@@ -764,17 +764,17 @@ async def get_json():
 
     if not status or not status.data:
         return {
-            "grid": 0,
-            "home": 0,
-            "solar": 0,
-            "battery": 0,
-            "soe": 0,
-            "soe_raw": 0,
-            "grid_status": 0,
-            "reserve": 0,
-            "time_remaining_hours": 0,
-            "full_pack_energy": 0,
-            "energy_remaining": 0,
+            "grid": None,
+            "home": None,
+            "solar": None,
+            "battery": None,
+            "soe": None,
+            "soe_raw": None,
+            "grid_status": None,
+            "reserve": None,
+            "time_remaining_hours": None,
+            "full_pack_energy": None,
+            "energy_remaining": None,
             "strings": {},
         }
 
@@ -833,10 +833,10 @@ async def get_battery_power():
     status = gateway_manager.get_gateway(gateway_id)
 
     if not status or not status.data:
-        return {"power": 0}
+        return {"power": None}
 
     aggregates = status.data.aggregates or {}
-    battery_power = aggregates.get("battery", {}).get("instant_power", 0)
+    battery_power = aggregates.get("battery", {}).get("instant_power")
 
     return {"power": battery_power}
 
