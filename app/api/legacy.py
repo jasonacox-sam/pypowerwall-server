@@ -1752,6 +1752,8 @@ async def get_stats():
         "PW_GRACEFUL_DEGRADATION": settings.graceful_degradation,
         "PW_HEALTH_CHECK": settings.health_check,
         "PW_CACHE_TTL": settings.cache_ttl,
+        "PW_TEDAPI_RECOVERY": settings.tedapi_recovery,
+        "PW_TEDAPI_PROBE_INTERVAL": settings.tedapi_probe_interval,
     }
 
     # Build connection health section
@@ -1802,6 +1804,14 @@ async def get_stats():
         },
         "gateway_statuses": gateway_statuses,
     }
+
+    # Add SolarOnly fallback mode state for each tracked gateway
+    fallback_summary = {
+        gw_id: gateway_manager.get_fallback_state(gw_id)
+        for gw_id in gateway_manager._fallback_state
+    }
+    if fallback_summary:
+        stats["fallback_mode"] = fallback_summary
 
     # Add default gateway info for backward compatibility
     if gateway_manager.gateways:

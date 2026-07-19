@@ -27,6 +27,9 @@ def _reset_singleton_state():
     gateway_manager._pending_configs.clear()
     gateway_manager._last_successful_data.clear()
     gateway_manager._preserve_stale_count.clear()
+    gateway_manager._fallback_state.clear()
+    gateway_manager._tedapi_probe_failures.clear()
+    gateway_manager._probe_tasks.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -147,6 +150,8 @@ def mock_gateway_manager(monkeypatch, mock_pypowerwall):
     gateway_manager.cache.clear()
     gateway_manager._last_successful_data.clear()
     gateway_manager._preserve_stale_count.clear()
+    gateway_manager._fallback_state.clear()
+    gateway_manager._tedapi_probe_failures.clear()
     
     # Mock the Powerwall constructor
     def mock_powerwall_init(*args, **kwargs):

@@ -641,13 +641,18 @@ async def health_check():
         if is_online:
             online_count += 1
 
-        gateway_details.append(
-            {
-                "id": gateway_id,
-                "online": is_online,
-                "error": status.error if status and status.error else None,
-            }
-        )
+        detail = {
+            "id": gateway_id,
+            "online": is_online,
+            "error": status.error if status and status.error else None,
+        }
+
+        # Include SolarOnly fallback state if tracked for this gateway
+        fallback = gateway_manager.get_fallback_state(gateway_id)
+        if fallback is not None:
+            detail["fallback_mode"] = fallback
+
+        gateway_details.append(detail)
 
     # Determine overall health
     if online_count == total:
@@ -657,6 +662,13 @@ async def health_check():
     else:
         health_status = "unhealthy"
 
+    # Build fallback_mode summary
+    from app.config import settings
+    fallback_summary = {
+        gw_id: gateway_manager.get_fallback_state(gw_id)
+        for gw_id in gateway_manager._fallback_state
+    }
+
     return {
         "status": health_status,
         "version": SERVER_VERSION,
@@ -665,7 +677,19 @@ async def health_check():
         "gateways_offline": total - online_count,
         "gateway_ids": list(gateway_manager.gateways.keys()),
         "gateway_details": gateway_details,
+        "fallback_mode": fallback_summary,
     }
+
+
+@app.post("/health/reset", tags=["Health"])
+async def reset_health():
+    """Reset health counters and clear fallback state.
+
+    Clears SolarOnly fallback mode tracking for all gateways, allowing
+    a fresh probe cycle.  Useful for testing or after manual intervention.
+    """
+    gateway_manager.reset_fallback_state()
+    return {"status": "ok", "message": "Health counters and fallback state reset"}
 
 
 def cli():
