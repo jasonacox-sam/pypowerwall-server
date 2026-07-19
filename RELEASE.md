@@ -2,6 +2,31 @@
 
 ## Version History
 
+### [0.4.1] - 2026-07-19
+
+**Changed:**
+- **Bumped `pypowerwall` dependency to `0.16.2`** (from `0.15.12`). Key upstream changes across the four intermediate releases:
+  - **v0.15.13**: Fleet API transport upgraded to HTTP/2 + TLS 1.3; fix for TEDAPI WiFi backoff race condition in multi-threaded deployments; Docker base image switched from Alpine to Debian-slim to avoid musl libc TLS fingerprint rejection by Tesla after long-running token expiry.
+  - **v0.16.0**: Full codebase review sweep — 101 new regression tests, critical bug fixes (`set_operation` reserve scale, FleetAPI token refresh wedge, TEDAPI `available_blocks` always 0), security hardening (query-string bypass, open proxy, CSRF), 19 crash-on-None fixes, native lock-timeout performance improvements.
+  - **v0.16.1**: Windows TLS fix — caps TLS to 1.2 on Windows where OpenSSL TLS 1.3 fingerprint is rejected by Tesla during PKCE code exchange; Linux/macOS retain TLS 1.3 pinning.
+  - **v0.16.2**: TEDAPI SolarOnly fallback mode (`PW_TEDAPI_RECOVERY=yes`) — automatic fallback to solar-only data on TEDAPI connectivity loss with exponential-backoff recovery; v1r `PENDING_VERIFICATION`/`UNKNOWN_KEY_ID` auth warnings now surfaced at normal log level; v1r WiFi-fallback response normalization (fixes blank firmware version on LAN→WiFi failover).
+- **TEDAPI connection mode logged at startup** — the connect message now states the exact mode being used (`TEDAPI full (WiFi)`, `TEDAPI v1r`, `TEDAPI v1r + WiFi`, `Cloud`, `FleetAPI`) so users can immediately see which code path pypowerwall is taking.
+- **Warning when `PW_RSA_KEY_PATH` + `PW_GW_PWD` are set together without `PW_WIFI_HOST`** — this combination activates TEDAPI v1r mode without a WiFi fallback path, causing follower Powerwall data to appear as `null`. The warning names both remedies: add `PW_WIFI_HOST=<gateway-ip>` to keep v1r with WiFi follower fallback, or remove `PW_RSA_KEY_PATH` to switch to TEDAPI full mode.
+
+**Added:**
+- **12 missing API compatibility endpoints** — `regression_test.py` identified gaps vs the old pypowerwall proxy server ALLOWLIST. All are now implemented as cache-backed or static-stub endpoints so pypowerwall-server is a complete drop-in replacement:
+  - `/api/meters/site` and `/api/meters/solar` — return the site/solar slice of cached aggregates as a list
+  - `/api/meters` — returns cached meter hardware config (empty list in TEDAPI mode)
+  - `/api/meters/readings` — stub `{}` (CT readings not available in TEDAPI/local mode)
+  - `/api/solars` and `/api/solars/brands` — cached inverter list + static brand list
+  - `/api/customer` — `{"registered": true}`
+  - `/api/installer` — minimal Tesla installer stub
+  - `/api/system/update/status` — static "update_succeeded" stub with current cached firmware version
+  - `/api/site_info/grid_codes` — empty list (grid code enumeration not available in TEDAPI mode)
+  - `/api/synchrometer/ct_voltage_references` — static Phase1/Phase2 CT reference stub
+  - `/api/solar_powerwall` — cached solar_powerwall data or `{}`
+- **`regression_test.py`** — local development regression script. Hits every endpoint on a running pypowerwall-server instance, validates HTTP 200 + JSON shape, and prints a colour-coded pass/fail summary. Usage: `python regression_test.py [base-url]` (default `http://localhost:8675`). Optionally compares two server instances side-by-side with `--compare <url-b>`.
+
 ### [0.4.0] - 2026-07-01
 
 **Security:**

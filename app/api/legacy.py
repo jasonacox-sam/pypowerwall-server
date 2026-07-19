@@ -1268,6 +1268,172 @@ async def get_api_aggregates():
     return status.data.aggregates or {}
 
 
+@router.get("/api/meters/site")
+async def get_api_meters_site():
+    """Get site meter data - API format (legacy proxy endpoint).
+
+    Returns the cached site (grid) power data from aggregates.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data or not status.data.aggregates:
+        return []
+
+    site = status.data.aggregates.get("site", {})
+    return [site] if site else []
+
+
+@router.get("/api/meters/solar")
+async def get_api_meters_solar():
+    """Get solar meter data - API format (legacy proxy endpoint).
+
+    Returns the cached solar power data from aggregates.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data or not status.data.aggregates:
+        return []
+
+    solar = status.data.aggregates.get("solar", {})
+    return [solar] if solar else []
+
+
+@router.get("/api/meters")
+async def get_api_meters():
+    """Get meters list - API format (legacy proxy endpoint).
+
+    Returns meter hardware configuration. Data not available in TEDAPI/local
+    mode; returns an empty list for API compatibility.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data:
+        return []
+
+    return status.data.meters or []
+
+
+@router.get("/api/meters/readings")
+async def get_api_meters_readings():
+    """Get meter readings - API format (legacy proxy endpoint).
+
+    Detailed CT meter readings are not available in TEDAPI/local mode.
+    Returns empty dict for API compatibility.
+    """
+    return {}
+
+
+@router.get("/api/solars")
+async def get_api_solars():
+    """Get solar inverter list - API format (legacy proxy endpoint).
+
+    Returns cached solar inverter data if available, otherwise an empty list.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data:
+        return []
+
+    return status.data.solars or []
+
+
+@router.get("/api/solars/brands")
+async def get_api_solars_brands():
+    """Get solar inverter brands list - API format (legacy proxy endpoint).
+
+    Returns a static list of known solar inverter brands for API compatibility.
+    """
+    return [
+        "ABB", "Advanced Energy Industries", "AEG Power Solutions",
+        "AEconversion", "Altair Energy", "Chilicon Power", "ClipperCreek",
+        "Darfon Electronics", "Delta Energy Systems", "Diehl AKO Stiftung",
+        "Enphase Energy", "FIMER", "Fronius", "Ginlong Technologies",
+        "GoodWe", "Growatt New Energy", "Huawei", "iGo", "Ingeteam",
+        "Kaco New Energy", "Kostal Solar Electric", "Power Electronics",
+        "Powercom", "Premier Power", "SMA Solar Technology", "SolarEdge",
+        "Solax Power", "Solectria Renewables", "SunGrow", "Sunnyboy",
+        "Sunnyside Solar", "Suntrica", "TMEIC", "Tesla", "Yaskawa Solectria",
+    ]
+
+
+@router.get("/api/customer")
+async def get_api_customer():
+    """Get customer info - API format (legacy proxy endpoint)."""
+    return {"registered": True}
+
+
+@router.get("/api/installer")
+async def get_api_installer():
+    """Get installer info - API format (legacy proxy endpoint)."""
+    return {
+        "company": "Tesla",
+        "customer_id": "",
+        "phone": "",
+        "email": "",
+        "location": "",
+        "mounting": "",
+        "wiring": "",
+        "backup_configuration": "Whole Home",
+        "run_sitemaster": True,
+    }
+
+
+@router.get("/api/system/update/status")
+async def get_api_system_update_status():
+    """Get system firmware update status - API format (legacy proxy endpoint)."""
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    version = None
+    if status and status.data:
+        version = status.data.version
+
+    return {
+        "state": "/update_succeeded",
+        "info": {"status": ["nonactionable"]},
+        "current_time": int(__import__("time").time() * 1000),
+        "last_status_time": int(__import__("time").time() * 1000),
+        "version": version or "Unknown",
+        "offline_updating": False,
+        "offline_update_error": "",
+        "estimated_bytes_per_second": None,
+    }
+
+
+@router.get("/api/site_info/grid_codes")
+async def get_api_site_info_grid_codes():
+    """Get available grid codes - API format (legacy proxy endpoint).
+
+    Returns empty list; grid code enumeration is not available in TEDAPI mode.
+    """
+    return []
+
+
+@router.get("/api/synchrometer/ct_voltage_references")
+async def get_api_synchrometer_ct_voltage_references():
+    """Get CT voltage references - API format (legacy proxy endpoint)."""
+    return {"ct1": "Phase1", "ct2": "Phase2", "ct3": "Phase1"}
+
+
+@router.get("/api/solar_powerwall")
+async def get_api_solar_powerwall():
+    """Get solar+powerwall combined data - API format (legacy proxy endpoint).
+
+    Returns cached solar_powerwall data if available, otherwise empty dict.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data:
+        return {}
+
+    return status.data.solar_powerwall or {}
+
+
 @router.get("/api/networks")
 @router.get("/api/system/networks")
 async def get_api_networks():
