@@ -1143,7 +1143,6 @@ class GatewayManager:
         state = self._fallback_state.get(gateway_id)
         if not state:
             return None
-        import copy
         snapshot = dict(state)
         if snapshot["fallback_since"]:
             snapshot["fallback_duration_seconds"] = round(
@@ -1155,7 +1154,7 @@ class GatewayManager:
         snapshot["recovery_enabled"] = settings.tedapi_recovery
         return snapshot
 
-    def reset_fallback_state(self, gateway_id: str = None):
+    def reset_fallback_state(self, gateway_id: Optional[str] = None):
         """Reset fallback state for one or all gateways."""
         ids = [gateway_id] if gateway_id else list(self._fallback_state.keys())
         for gid in ids:

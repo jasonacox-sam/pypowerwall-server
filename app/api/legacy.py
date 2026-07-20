@@ -1976,8 +1976,7 @@ async def get_stats():
         gw_id: gateway_manager.get_fallback_state(gw_id)
         for gw_id in gateway_manager._fallback_state
     }
-    if fallback_summary:
-        stats["fallback_mode"] = fallback_summary
+    stats["fallback_mode"] = fallback_summary
 
     # Add default gateway info for backward compatibility
     if gateway_manager.gateways:

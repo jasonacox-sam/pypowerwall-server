@@ -14,6 +14,8 @@
 - **Warning when `PW_RSA_KEY_PATH` + `PW_GW_PWD` are set together without `PW_WIFI_HOST`** — this combination activates TEDAPI v1r mode without a WiFi fallback path, causing follower Powerwall data to appear as `null`. The warning names both remedies: add `PW_WIFI_HOST=<gateway-ip>` to keep v1r with WiFi follower fallback, or remove `PW_RSA_KEY_PATH` to switch to TEDAPI full mode.
 
 **Added:**
+- **TEDAPI SolarOnly fallback tracking and auto-recovery** — per-gateway background probe monitors TEDAPI health and detects SolarOnly fallback (when TEDAPI drops but solar data continues). After 3 consecutive failed probes, enters fallback mode and attempts `pw.connect()` recovery with exponential backoff (60s → max 300s). No restart, no data gap — the gateway keeps serving whatever data is available. Exposed via `fallback_mode` in `/health` and `/stats`, plus `POST /health/reset` to clear state. Config: `PW_TEDAPI_RECOVERY` (default: `yes`), `PW_TEDAPI_PROBE_INTERVAL` (default: `30`).
+- **`POST /health/reset` now requires `PW_CONTROL_SECRET`** — the endpoint mutates server state and is now gated by the same bearer token as `/control/*` endpoints, preventing unauthorised resets on exposed servers.
 - **12 missing API compatibility endpoints** — `regression_test.py` identified gaps vs the old pypowerwall proxy server ALLOWLIST. All are now implemented as cache-backed or static-stub endpoints so pypowerwall-server is a complete drop-in replacement:
   - `/api/meters/site` and `/api/meters/solar` — return the site/solar slice of cached aggregates as a list
   - `/api/meters` — returns cached meter hardware config (empty list in TEDAPI mode)

@@ -57,10 +57,14 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+from typing import Optional
+
+from app.api.auth import verify_control_token
 
 from app.config import settings, SERVER_VERSION
 from app.api import legacy, gateways, aggregates, websockets
@@ -663,7 +667,6 @@ async def health_check():
         health_status = "unhealthy"
 
     # Build fallback_mode summary
-    from app.config import settings
     fallback_summary = {
         gw_id: gateway_manager.get_fallback_state(gw_id)
         for gw_id in gateway_manager._fallback_state
@@ -682,14 +685,16 @@ async def health_check():
 
 
 @app.post("/health/reset", tags=["Health"])
-async def reset_health():
-    """Reset health counters and clear fallback state.
+async def reset_health(authorization: Optional[str] = Header(None)):
+    """Reset SolarOnly fallback state for all gateways.
 
-    Clears SolarOnly fallback mode tracking for all gateways, allowing
-    a fresh probe cycle.  Useful for testing or after manual intervention.
+    Clears fallback tracking counters and allows a fresh probe cycle.
+    Requires ``PW_CONTROL_SECRET`` bearer token (same as ``/control/*``
+    endpoints) to prevent unauthorised state resets on exposed servers.
     """
+    verify_control_token(authorization)
     gateway_manager.reset_fallback_state()
-    return {"status": "ok", "message": "Health counters and fallback state reset"}
+    return {"status": "ok", "message": "SolarOnly fallback state reset for all gateways"}
 
 
 def cli():

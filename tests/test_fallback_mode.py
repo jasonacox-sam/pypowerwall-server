@@ -9,10 +9,9 @@ Covers:
 - /health/reset clears fallback state
 - Config env var parsing for PW_TEDAPI_RECOVERY / PW_TEDAPI_PROBE_INTERVAL
 """
-import asyncio
 import time
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from app.core.gateway_manager import GatewayManager
 
@@ -46,7 +45,7 @@ class TestFallbackModeLifecycle:
         gm._enter_fallback_mode("gw1", "first")
         first_since = gm._fallback_state["gw1"]["fallback_since"]
 
-        time.sleep(0.02)
+        # Second enter must not overwrite fallback_since
         gm._enter_fallback_mode("gw1", "second")
 
         assert gm._fallback_state["gw1"]["fallback_since"] == first_since
@@ -163,12 +162,12 @@ class TestHealthEndpointFallback:
 
     def test_health_no_fallback(self, client):
         """/health works when no fallback state exists."""
-        with patch("app.core.gateway_manager.gateway_manager") as mock_gm:
-            mock_gm.gateways = {}
-            response = client.get("/health")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "no_gateways"
+        # Autouse fixture already clears singleton state — no gateways means
+        # the health endpoint returns "no_gateways" without fallback data.
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "no_gateways"
 
     def test_health_with_fallback(self, client):
         """/health includes fallback_mode when a gateway is in fallback."""
@@ -219,12 +218,23 @@ class TestStatsEndpointFallback:
 class TestHealthResetEndpoint:
     """/health/reset clears fallback state."""
 
-    def test_health_reset_returns_ok(self, client):
-        """POST /health/reset returns ok."""
+    def test_health_reset_requires_auth(self, client):
+        """POST /health/reset returns 403 when control secret is not set."""
         response = client.post("/health/reset")
+        assert response.status_code == 403
+
+    def test_health_reset_returns_ok_with_token(self, client, monkeypatch):
+        """POST /health/reset returns ok with a valid control token."""
+        from app.config import settings
+        monkeypatch.setattr(settings, "control_secret", "test-secret")
+        response = client.post(
+            "/health/reset",
+            headers={"Authorization": "Bearer test-secret"},
+        )
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
+        assert "fallback" in data["message"].lower()
 
 
 class TestConfigSettings:
