@@ -106,6 +106,30 @@ async def test_polling_updates_gateway_data(mock_gateway_manager, mock_pypowerwa
 
 
 @pytest.mark.asyncio
+async def test_polling_logs_site_name_on_connect(caplog, mock_gateway_manager, mock_pypowerwall):
+    """Test that the connection-success log includes the Tesla site name."""
+    import logging
+    from app.models.gateway import Gateway, GatewayStatus
+
+    gateway = Gateway(
+        id="site-name-test",
+        name="Site Name Test",
+        host="192.168.1.101",
+        gw_pwd="password123",
+    )
+
+    mock_gateway_manager.gateways["site-name-test"] = gateway
+    mock_gateway_manager.connections["site-name-test"] = mock_pypowerwall
+    mock_gateway_manager.cache["site-name-test"] = GatewayStatus(gateway=gateway, online=False)
+
+    with caplog.at_level(logging.INFO):
+        await mock_gateway_manager._poll_gateway("site-name-test")
+
+    assert "Successfully connected to gateway site-name-test" in caplog.text
+    assert "Site: Test Site" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_polling_handles_timeout(mock_gateway_manager, mock_pypowerwall):
     """Test that polling handles timeouts gracefully."""
     from app.models.gateway import Gateway, GatewayStatus

@@ -1049,8 +1049,9 @@ class GatewayManager:
             self._last_successful_data[gateway_id] = data
 
             if was_offline:
+                site_label = f" - Site: {data.site_name}" if data.site_name else ""
                 logger.info(
-                    f"Successfully connected to gateway {gateway_id} ({gateway.host})"
+                    f"Successfully connected to gateway {gateway_id} ({gateway.host}){site_label}"
                 )
                 if previous_failures > 0:
                     logger.debug(

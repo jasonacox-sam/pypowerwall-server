@@ -100,6 +100,7 @@ def mock_pypowerwall():
     mock.alerts.return_value = []
     mock.din.return_value = "1232100-00-E--T14111AB1234567"
     mock.uptime.return_value = "5d 3h 42m"
+    mock.site_name.return_value = "Test Site"
     mock.get_reserve.return_value = 20
     mock.get_time_remaining.return_value = 8.5
     mock.get_mode.return_value = "self_consumption"
