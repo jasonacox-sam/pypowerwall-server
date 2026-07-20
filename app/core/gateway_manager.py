@@ -1049,7 +1049,11 @@ class GatewayManager:
             self._last_successful_data[gateway_id] = data
 
             if was_offline:
-                site_label = f" - Site: {data.site_name}" if data.site_name else ""
+                # Sanitize site_name (external input) — strip CR/LF and other
+                # control chars to prevent log forging/injection.
+                raw_site = data.site_name or ""
+                site_clean = " ".join(raw_site.split())
+                site_label = f" - Site: {site_clean}" if site_clean else ""
                 logger.info(
                     f"Successfully connected to gateway {gateway_id} ({gateway.host}){site_label}"
                 )
