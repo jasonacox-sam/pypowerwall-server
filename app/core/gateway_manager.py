@@ -63,6 +63,7 @@ Performance:
 import asyncio
 import json
 import logging
+import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -99,6 +100,12 @@ _WRITE_METHODS = frozenset(
 class GatewayManager:
     """Manages multiple Powerwall gateway connections."""
 
+    # Consecutive TEDAPI probe failures before entering fallback mode.
+    _TEDAPI_FALLBACK_THRESHOLD = 3
+    # Recovery retry intervals (seconds) — exponential backoff.
+    _TEDAPI_RECOVERY_INITIAL_INTERVAL = 60
+    _TEDAPI_RECOVERY_MAX_INTERVAL = 300
+
     def __init__(self):
         self.gateways: Dict[str, Gateway] = {}
         self.connections: Dict[str, pypowerwall.Powerwall] = {}
@@ -129,6 +136,14 @@ class GatewayManager:
             str, GatewayConfig
         ] = {}  # Gateways waiting for lazy initialization
         self._preserve_stale_count: Dict[str, int] = {}  # Multi-PW snapshot preservation staleness tracker
+
+        # TEDAPI SolarOnly fallback tracking (per gateway).
+        # Distinct from _consecutive_failures: is_degraded = transient transport
+        # failures; is_fallback_mode = TEDAPI has fallen back to SolarOnly mode
+        # and needs explicit reconnection.
+        self._fallback_state: Dict[str, Dict] = {}
+        self._tedapi_probe_failures: Dict[str, int] = {}
+        self._probe_tasks: Dict[str, asyncio.Task] = {}  # Per-gateway TEDAPI probe tasks
 
         # Dedicated thread pool for blocking pypowerwall operations
         # Will be sized during initialize() based on gateway count
@@ -283,6 +298,8 @@ class GatewayManager:
         """
         self._poll_interval = poll_interval
 
+        from app.config import settings
+
         # Size thread pool based on gateway count
         # Formula: max(10, num_gateways * 3) to support concurrent API calls
         num_gateways = len(gateway_configs)
@@ -392,6 +409,27 @@ class GatewayManager:
             self._poll_tasks[gateway_id] = asyncio.create_task(
                 self._poll_gateway_loop(gateway_id), name=f"poll-{gateway_id}"
             )
+
+        # Start TEDAPI probe/recovery tasks for TEDAPI gateways.
+        # Probes pw.version() on an interval; after N consecutive None results,
+        # enters fallback mode and attempts pw.connect() with exponential backoff.
+        if settings.tedapi_recovery:
+            for gateway_id, gw in self.gateways.items():
+                if gw.host and not gw.cloud_mode and not gw.fleetapi:
+                    self._fallback_state[gateway_id] = self._new_fallback_state()
+                    self._tedapi_probe_failures[gateway_id] = 0
+                    self._probe_tasks[gateway_id] = asyncio.create_task(
+                        self._tedapi_probe_loop(gateway_id),
+                        name=f"tedapi-probe-{gateway_id}",
+                    )
+                    logger.info(
+                        "TEDAPI probe/recovery task started for gateway %s "
+                        "(interval=%ds, threshold=%d)",
+                        gateway_id,
+                        settings.tedapi_probe_interval,
+                        self._TEDAPI_FALLBACK_THRESHOLD,
+                    )
+
         if self.gateways:
             logger.info(
                 f"Gateway manager ready - {len(self.gateways)} gateway(s) will connect on first poll"
@@ -429,24 +467,71 @@ class GatewayManager:
                     f"Cloud control connection failed (control will be unavailable): {e}"
                 )
 
+    async def _cancel_task_with_retry(
+        self,
+        task: asyncio.Task,
+        name: str,
+        attempt_timeout: float = 0.5,
+        max_attempts: int = 6,
+    ):
+        """Cancel a task, re-issuing cancel() until it actually stops.
+
+        A single Task.cancel() call is not always sufficient: if the task is
+        currently awaiting a run_in_executor() future whose underlying
+        concurrent.futures.Future has already started running in a worker
+        thread, that future's cancel() is a no-op (can't interrupt a running
+        thread), and asyncio silently drops the cancellation request instead
+        of retrying it. The task then keeps running past its next await
+        point as if nothing happened. Re-issuing cancel() on a short timer
+        catches it the next time the task is at a genuinely cancellable
+        suspension point (e.g. asyncio.sleep()).
+        """
+        for attempt in range(max_attempts):
+            if task.done():
+                break
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=attempt_timeout)
+                break
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Task '{name}' error during shutdown: {e}")
+                break
+        else:
+            logger.warning(
+                f"Task '{name}' did not stop after {max_attempts} cancellation "
+                f"attempts (~{max_attempts * attempt_timeout:.1f}s); abandoning it"
+            )
+
     async def shutdown(self):
         """Shutdown gateway manager and cleanup resources."""
         # Stop polling first so no new MQTT publishes are scheduled,
         # then cancel any in-flight publish tasks.
-        tasks = list(self._poll_tasks.values())
+        named_tasks = [(t, f"poll-{gid}") for gid, t in self._poll_tasks.items()]
+        named_tasks.extend(
+            (t, f"tedapi-probe-{gid}") for gid, t in self._probe_tasks.items()
+        )
         if self._cloud_control_task:
-            tasks.append(self._cloud_control_task)
-        tasks.extend(self._mqtt_tasks.values())
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.debug(f"Task error during shutdown: {e}")
+            named_tasks.append((self._cloud_control_task, "cloud-control-init"))
+        named_tasks.extend(
+            (t, f"mqtt-{gid}") for gid, t in self._mqtt_tasks.items()
+        )
+
+        # Cancel all tasks concurrently so one slow-to-cancel task doesn't
+        # delay cancellation of the others.
+        await asyncio.gather(
+            *(
+                self._cancel_task_with_retry(task, name)
+                for task, name in named_tasks
+            ),
+            return_exceptions=True,
+        )
+
         self._poll_tasks.clear()
+        self._probe_tasks.clear()
         self._mqtt_tasks.clear()
 
         # Shutdown thread pool executor
@@ -1052,6 +1137,222 @@ class GatewayManager:
             mqtt_publisher.publish_gateway(gateway_id, self.cache[gateway_id]),
             name=f"mqtt-publish-{gateway_id}",
         )
+
+    def _new_fallback_state(self) -> Dict:
+        """Create a fresh fallback state dict."""
+        return {
+            "is_fallback_mode": False,
+            "fallback_since": None,
+            "recovery_attempts": 0,
+            "last_recovery_attempt": None,
+        }
+
+    def _enter_fallback_mode(self, gateway_id: str, reason: str = "TEDAPI data unavailable"):
+        """Signal that a gateway has entered SolarOnly fallback mode."""
+        state = self._fallback_state.get(gateway_id)
+        if not state:
+            return
+        if not state["is_fallback_mode"]:
+            state["is_fallback_mode"] = True
+            state["fallback_since"] = time.time()
+            state["recovery_attempts"] = 0
+            state["last_recovery_attempt"] = None
+            logger.warning(
+                "Gateway %s entering SolarOnly fallback mode: %s. "
+                "Background recovery will retry periodically.",
+                gateway_id,
+                reason,
+            )
+
+    def _exit_fallback_mode(self, gateway_id: str):
+        """Signal that a gateway has recovered from SolarOnly fallback mode."""
+        state = self._fallback_state.get(gateway_id)
+        if not state or not state["is_fallback_mode"]:
+            return
+        duration = time.time() - (state["fallback_since"] or time.time())
+        attempts = state["recovery_attempts"]
+        state["is_fallback_mode"] = False
+        state["fallback_since"] = None
+        state["recovery_attempts"] = 0
+        state["last_recovery_attempt"] = None
+        logger.info(
+            "Gateway %s recovered from SolarOnly fallback mode after "
+            "%.0fs and %d recovery attempt(s).",
+            gateway_id,
+            duration,
+            attempts,
+        )
+
+    def get_fallback_state(self, gateway_id: str) -> Optional[Dict]:
+        """Get fallback state for a gateway, or None if not tracked."""
+        state = self._fallback_state.get(gateway_id)
+        if not state:
+            return None
+        snapshot = dict(state)
+        if snapshot["fallback_since"]:
+            snapshot["fallback_duration_seconds"] = round(
+                time.time() - snapshot["fallback_since"], 1
+            )
+        else:
+            snapshot["fallback_duration_seconds"] = None
+        from app.config import settings
+        snapshot["recovery_enabled"] = settings.tedapi_recovery
+        return snapshot
+
+    def get_all_fallback_states(self) -> Dict[str, Dict]:
+        """Get fallback state snapshots for all tracked gateways.
+
+        Returns:
+            Dict mapping gateway_id → fallback state snapshot (see
+            get_fallback_state).  Empty dict when no gateways are tracked.
+        """
+        return {
+            gw_id: self.get_fallback_state(gw_id)
+            for gw_id in self._fallback_state
+        }
+
+    def reset_fallback_state(self, gateway_id: Optional[str] = None):
+        """Reset fallback state for one or all gateways."""
+        ids = [gateway_id] if gateway_id else list(self._fallback_state.keys())
+        for gid in ids:
+            state = self._fallback_state.get(gid)
+            if state:
+                state["is_fallback_mode"] = False
+                state["fallback_since"] = None
+                state["recovery_attempts"] = 0
+                state["last_recovery_attempt"] = None
+            self._tedapi_probe_failures[gid] = 0
+            logger.info("Reset fallback state for gateway %s", gid)
+
+    async def _tedapi_probe_loop(self, gateway_id: str):
+        """Background task: probe TEDAPI health and recover from SolarOnly fallback.
+
+        Probes pw.version() every PW_TEDAPI_PROBE_INTERVAL seconds.  After
+        _TEDAPI_FALLBACK_THRESHOLD consecutive None results, enters fallback
+        mode and attempts pw.connect() with exponential backoff (60s → max 300s).
+        On success, exits fallback mode and resets backoff.  On failure, stays
+        in SolarOnly — the gateway keeps serving whatever data is available.
+
+        Hybrid-mode note: the gate is pw.tedapi, which includes hybrid mode
+        (v1r + WiFi fallback).  In that topology pw.version() may be served by
+        the local API, so a WiFi TEDAPI outage might not be detected.  Monitoring
+        is best-effort for hybrid; pure TEDAPI mode gets full coverage.
+        """
+        from app.config import settings
+
+        probe_interval = max(5, settings.tedapi_probe_interval)
+        recovery_interval = self._TEDAPI_RECOVERY_INITIAL_INTERVAL
+
+        while True:
+            try:
+                await asyncio.sleep(probe_interval)
+
+                pw = self.connections.get(gateway_id)
+                if not pw:
+                    # Connection not yet established; skip probe
+                    continue
+
+                # Only probe when TEDAPI mode is active
+                if not getattr(pw, 'tedapi', None):
+                    self._tedapi_probe_failures[gateway_id] = 0
+                    continue
+
+                state = self._fallback_state.get(gateway_id)
+                if not state:
+                    continue
+
+                if not state["is_fallback_mode"]:
+                    # Healthy path: probe TEDAPI
+                    try:
+                        loop = asyncio.get_running_loop()
+                        version = await asyncio.wait_for(
+                            loop.run_in_executor(self._executor, pw.version),
+                            timeout=max(5.0, settings.timeout + 2.0),
+                        )
+                    except Exception as probe_exc:
+                        logger.debug(
+                            "TEDAPI probe exception for %s (counts as failure): %s",
+                            gateway_id, probe_exc,
+                        )
+                        version = None
+
+                    if version is not None:
+                        self._tedapi_probe_failures[gateway_id] = 0
+                        recovery_interval = self._TEDAPI_RECOVERY_INITIAL_INTERVAL
+                    else:
+                        failures = self._tedapi_probe_failures.get(gateway_id, 0) + 1
+                        self._tedapi_probe_failures[gateway_id] = failures
+                        if failures >= self._TEDAPI_FALLBACK_THRESHOLD:
+                            self._enter_fallback_mode(
+                                gateway_id,
+                                f"TEDAPI returned no data for {failures} consecutive probes",
+                            )
+                else:
+                    # Fallback path: wait the backoff interval then attempt reconnect
+                    extra_wait = recovery_interval - probe_interval
+                    if extra_wait > 0:
+                        await asyncio.sleep(extra_wait)
+
+                    # Re-check after sleep: reset may have cleared state
+                    if not state["is_fallback_mode"]:
+                        self._tedapi_probe_failures[gateway_id] = 0
+                        recovery_interval = self._TEDAPI_RECOVERY_INITIAL_INTERVAL
+                        continue
+
+                    state["recovery_attempts"] += 1
+                    state["last_recovery_attempt"] = time.time()
+                    attempt_num = state["recovery_attempts"]
+
+                    logger.info(
+                        "TEDAPI recovery attempt #%d for %s (interval=%ds)...",
+                        attempt_num, gateway_id, recovery_interval,
+                    )
+
+                    recovered = False
+                    try:
+                        loop = asyncio.get_running_loop()
+                        connect_result = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                self._executor, lambda: pw.connect(retry=False)
+                            ),
+                            timeout=max(15.0, settings.timeout + 5.0),
+                        )
+                        if connect_result:
+                            verify_version = await asyncio.wait_for(
+                                loop.run_in_executor(self._executor, pw.version),
+                                timeout=max(5.0, settings.timeout + 2.0),
+                            )
+                            if verify_version is not None:
+                                recovered = True
+                    except Exception as exc:
+                        logger.warning(
+                            "TEDAPI recovery attempt #%d for %s exception: %s",
+                            attempt_num, gateway_id, exc,
+                        )
+
+                    if recovered:
+                        self._exit_fallback_mode(gateway_id)
+                        self._tedapi_probe_failures[gateway_id] = 0
+                        recovery_interval = self._TEDAPI_RECOVERY_INITIAL_INTERVAL
+                    else:
+                        next_interval = min(
+                            recovery_interval * 2,
+                            self._TEDAPI_RECOVERY_MAX_INTERVAL,
+                        )
+                        logger.warning(
+                            "TEDAPI recovery attempt #%d for %s failed — "
+                            "staying in SolarOnly, next retry in %ds",
+                            attempt_num, gateway_id, next_interval,
+                        )
+                        recovery_interval = next_interval
+
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning(
+                    "TEDAPI probe/recovery task unexpected error for %s: %s",
+                    gateway_id, exc,
+                )
 
     def get_gateway(self, gateway_id: str) -> Optional[GatewayStatus]:
         """Get status for a specific gateway with graceful degradation support.

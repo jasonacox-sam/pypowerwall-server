@@ -832,12 +832,17 @@ async def get_pod():
     if status.data.vitals:
         vitals = status.data.vitals
         
-        # Build a map of serial numbers to vitals data
+        # Build a map of serial numbers to vitals data.
+        # Prefer the serialNumber field; fall back to the serial embedded in the
+        # device key (TEPOD--{partno}--{serial}) — live PW3 TEDAPI vitals have
+        # no serialNumber field, only the key carries the serial.
         tepod_map = {}
         for device in vitals:
             if device.startswith("TEPOD"):
                 v = vitals[device]
                 serial = v.get("serialNumber")
+                if not serial and "--" in device:
+                    serial = device.rsplit("--", 1)[1]
                 if serial:
                     tepod_map[serial] = (device, v)
         
@@ -1056,9 +1061,17 @@ async def get_api_sitemaster():
             "status": "StatusUp",
             "running": True,
             "connected_to_tesla": status.online,  # True only if actually connected
+            "power_supply_mode": False,
+            "can_reboot": "Yes",
         }
 
-    return {"status": "StatusDown", "running": False, "connected_to_tesla": False}
+    return {
+        "status": "StatusDown",
+        "running": False,
+        "connected_to_tesla": False,
+        "power_supply_mode": False,
+        "can_reboot": "Yes",
+    }
 
 
 @router.get("/api/troubleshooting/problems")
@@ -1233,15 +1246,12 @@ async def get_api_operation():
 
 @router.get("/api/customer/registration")
 async def get_api_customer_registration():
-    """Get customer registration - API format (legacy proxy endpoint)."""
-    return {
-        "privacy_notice": True,
-        "limited_warranty": True,
-        "grid_services": False,
-        "marketing": False,
-        "registered": True,
-        "timed_out_registration": False,
-    }
+    """Get customer registration - API format (legacy proxy endpoint).
+
+    The old proxy deliberately disables this endpoint (it can leak customer
+    PII).  Match its disabled response exactly for drop-in compatibility.
+    """
+    return {"status": "404 Response - API Disabled"}
 
 
 @router.get("/api/system_status/grid_faults")
@@ -1266,6 +1276,184 @@ async def get_api_aggregates():
         return {}
 
     return status.data.aggregates or {}
+
+
+@router.get("/api/meters/site")
+async def get_api_meters_site():
+    """Get site meter hardware config - API format (legacy proxy endpoint).
+
+    The old proxy returns the synchrometer CT configuration synthesized by
+    pypowerwall (id/location/type/cts/Cached_readings).  pypowerwall builds
+    this from its internal TEDAPI cache, so an on-demand call is cheap.
+    Falls back to empty list when the gateway is offline (like /tedapi/*,
+    this diagnostic-style endpoint is exempt from the strict cache-only rule).
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.online:
+        return []
+
+    result = await gateway_manager.call_api(
+        gateway_id, "poll", "/api/meters/site", timeout=5.0
+    )
+    if result is None or isinstance(result, str):
+        return []
+    return result
+
+
+@router.get("/api/meters/solar")
+async def get_api_meters_solar():
+    """Get solar meter data - API format (legacy proxy endpoint).
+
+    Returns the cached solar power data from aggregates.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data or not status.data.aggregates:
+        return []
+
+    solar = status.data.aggregates.get("solar", {})
+    return [solar] if solar else []
+
+
+@router.get("/api/meters")
+async def get_api_meters():
+    """Get meters list - API format (legacy proxy endpoint).
+
+    Returns meter hardware configuration. Data not available in TEDAPI/local
+    mode; returns an empty list for API compatibility.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data:
+        return []
+
+    return status.data.meters or []
+
+
+@router.get("/api/meters/readings")
+async def get_api_meters_readings():
+    """Get meter readings - API format (legacy proxy endpoint).
+
+    Detailed CT meter readings are not available in TEDAPI/local mode.
+    Returns empty dict for API compatibility.
+    """
+    return {}
+
+
+@router.get("/api/solars")
+async def get_api_solars():
+    """Get solar inverter list - API format (legacy proxy endpoint).
+
+    Returns cached solar inverter data if available, otherwise an empty list.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data:
+        return []
+
+    return status.data.solars or []
+
+
+@router.get("/api/solars/brands")
+async def get_api_solars_brands():
+    """Get solar inverter brands list - API format (legacy proxy endpoint).
+
+    Returns a static list of known solar inverter brands for API compatibility.
+    """
+    return [
+        "ABB", "Advanced Energy Industries", "AEG Power Solutions",
+        "AEconversion", "Altair Energy", "Chilicon Power", "ClipperCreek",
+        "Darfon Electronics", "Delta Energy Systems", "Diehl AKO Stiftung",
+        "Enphase Energy", "FIMER", "Fronius", "Ginlong Technologies",
+        "GoodWe", "Growatt New Energy", "Huawei", "iGo", "Ingeteam",
+        "Kaco New Energy", "Kostal Solar Electric", "Power Electronics",
+        "Powercom", "Premier Power", "SMA Solar Technology", "SolarEdge",
+        "Solax Power", "Solectria Renewables", "SunGrow", "Sunnyboy",
+        "Sunnyside Solar", "Suntrica", "TMEIC", "Tesla", "Yaskawa Solectria",
+    ]
+
+
+@router.get("/api/customer")
+async def get_api_customer():
+    """Get customer info - API format (legacy proxy endpoint)."""
+    return {"registered": True}
+
+
+@router.get("/api/installer")
+async def get_api_installer():
+    """Get installer info - API format (legacy proxy endpoint)."""
+    return {
+        "company": "Tesla",
+        "customer_id": "",
+        "phone": "",
+        "email": "",
+        "location": "",
+        "mounting": "",
+        "wiring": "",
+        "backup_configuration": "Whole Home",
+        "solar_installation": "New",
+        "solar_installation_type": "PV Panel",
+        "run_sitemaster": True,
+        "verified_config": True,
+        "installation_types": ["Residential"],
+    }
+
+
+@router.get("/api/system/update/status")
+async def get_api_system_update_status():
+    """Get system firmware update status - API format (legacy proxy endpoint)."""
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    version = None
+    if status and status.data:
+        version = status.data.version
+
+    return {
+        "state": "/update_succeeded",
+        "info": {"status": ["nonactionable"]},
+        "current_time": int(__import__("time").time() * 1000),
+        "last_status_time": int(__import__("time").time() * 1000),
+        "version": version or "Unknown",
+        "offline_updating": False,
+        "offline_update_error": "",
+        "estimated_bytes_per_second": None,
+    }
+
+
+@router.get("/api/site_info/grid_codes")
+async def get_api_site_info_grid_codes():
+    """Get available grid codes - API format (legacy proxy endpoint).
+
+    Returns empty list; grid code enumeration is not available in TEDAPI mode.
+    """
+    return []
+
+
+@router.get("/api/synchrometer/ct_voltage_references")
+async def get_api_synchrometer_ct_voltage_references():
+    """Get CT voltage references - API format (legacy proxy endpoint)."""
+    return {"ct1": "Phase1", "ct2": "Phase2", "ct3": "Phase1"}
+
+
+@router.get("/api/solar_powerwall")
+async def get_api_solar_powerwall():
+    """Get solar+powerwall combined data - API format (legacy proxy endpoint).
+
+    Returns cached solar_powerwall data if available, otherwise empty dict.
+    """
+    gateway_id = get_default_gateway()
+    status = gateway_manager.get_gateway(gateway_id)
+
+    if not status or not status.data:
+        return {}
+
+    return status.data.solar_powerwall or {}
 
 
 @router.get("/api/networks")
@@ -1310,17 +1498,18 @@ async def get_api_powerwalls():
 
 @router.get("/pw/level")
 async def pw_level():
-    """Battery state of energy (%)."""
+    """Battery state of energy (%).
+
+    Old proxy shape: {"level": <raw soe>} — pw.level() returns the raw
+    (unscaled) percentage from /api/system_status/soe.
+    """
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)
 
     if not status or not status.data:
-        return {"percentage": None, "raw_percentage": None}
+        return {"level": None}
 
-    return {
-        "percentage": status.data.soe,
-        "raw_percentage": status.data.soe_raw,
-    }
+    return {"level": status.data.soe_raw}
 
 
 @router.get("/pw/power")
@@ -1367,17 +1556,18 @@ async def pw_solar():
 
 @router.get("/pw/battery")
 async def pw_battery():
-    """Battery power data."""
+    """Battery power data.
+
+    Old proxy shape: pw.battery(verbose=True) — the full battery meter block
+    from aggregates (instant_power, voltage, current, energy counters, etc.).
+    """
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)
 
-    if not status or not status.data:
-        return {"power": 0}
+    if not status or not status.data or not status.data.aggregates:
+        return {}
 
-    aggregates = status.data.aggregates or {}
-    battery_power = aggregates.get("battery", {}).get("instant_power", 0)
-
-    return {"power": battery_power}
+    return status.data.aggregates.get("battery", {})
 
 
 # The /pw/battery_blocks endpoint provides block-level detail.
@@ -1385,14 +1575,41 @@ async def pw_battery():
 
 @router.get("/pw/battery_blocks")
 async def pw_battery_blocks():
-    """Battery block details."""
+    """Battery block details.
+
+    Old proxy shape: pw.battery_blocks() — dict keyed by PackageSerialNumber
+    (serial removed from the block body), augmented with TETHC temperature
+    and state data from vitals when available.
+    """
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)
 
     if not status or not status.data or not status.data.system_status:
-        return []
+        return {}
 
-    return status.data.system_status.get("battery_blocks", [])
+    result: dict = {}
+    for bat in status.data.system_status.get("battery_blocks") or []:
+        sn = bat.get("PackageSerialNumber")
+        result[sn] = {k: v for k, v in bat.items() if k != "PackageSerialNumber"}
+
+    # Merge TETHC temperature/state from vitals (pw.battery_blocks behavior)
+    vitals = status.data.vitals or {}
+    for device, d in vitals.items():
+        if device.startswith("TETHC--"):
+            parts = device.split("--")
+            if len(parts) < 3:
+                continue
+            sn = parts[2]
+            if sn not in result:
+                result[sn] = {}
+            result[sn].update(
+                {
+                    "THC_State": d.get("THC_State"),
+                    "temperature": d.get("THC_AmbientTemp"),
+                }
+            )
+
+    return result
 
 
 @router.get("/pw/load")
@@ -1457,14 +1674,46 @@ async def pw_temps():
 
 @router.get("/pw/strings")
 async def pw_strings():
-    """Solar string data."""
+    """Solar string data.
+
+    Old proxy shape: pw.strings(verbose=True) — dict keyed by PVAC device name
+    with PVAC_Pout plus per-string PVAC_PVCurrent/PVMeasuredPower/
+    PVMeasuredVoltage/PvState and PVS_String* fields. Derived from cached
+    vitals (with PVS string data injected, matching library behavior).
+    """
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)
 
     if not status or not status.data:
         return {}
 
-    return status.data.strings or {}
+    vitals = status.data.vitals or {}
+    if not vitals:
+        # No vitals (e.g. cloud mode) — fall back to the simplified cache
+        return status.data.strings or {}
+
+    result: dict = {}
+    for device, d in vitals.items():
+        if device.split("--")[0] != "PVAC":
+            continue
+        entry = {"PVAC_Pout": d.get("PVAC_Pout")}
+        for field, value in d.items():
+            if (
+                "PVAC_PVCurrent" in field
+                or "PVAC_PVMeasuredPower" in field
+                or "PVAC_PVMeasuredVoltage" in field
+                or "PVAC_PvState" in field
+                or "PVS_String" in field
+            ):
+                entry[field] = value
+        # Inject PVS string data from the matching PVS device (library behavior)
+        pvs_key = "PVS" + device[4:]
+        for field, value in (vitals.get(pvs_key) or {}).items():
+            if "String" in field:
+                entry[field] = value
+        result[device] = entry
+
+    return result if result else (status.data.strings or {})
 
 
 @router.get("/pw/din")
@@ -1517,14 +1766,12 @@ async def pw_version():
 
 @router.get("/pw/status")
 async def pw_status():
-    """Status summary."""
-    gateway_id = get_default_gateway()
-    status = gateway_manager.get_gateway(gateway_id)
+    """Status summary.
 
-    if not status or not status.data:
-        return {"status": None}
-
-    return {"status": status.data.status}
+    Old proxy shape: pw.status() — the full /api/status payload (din,
+    start_time, version, etc.).  Reuses the /api/status builder.
+    """
+    return await get_api_status()
 
 
 @router.get("/pw/system_status")
@@ -1541,14 +1788,13 @@ async def pw_system_status():
 
 @router.get("/pw/grid_status")
 async def pw_grid_status():
-    """Grid status."""
-    gateway_id = get_default_gateway()
-    status = gateway_manager.get_gateway(gateway_id)
+    """Grid status.
 
-    if not status or not status.data:
-        return {"grid_status": "Unknown"}
-
-    return {"grid_status": status.data.grid_status or "Unknown"}
+    Old proxy shape: pw.grid_status("json") — the raw
+    /api/system_status/grid_status payload (grid_status +
+    grid_services_active).  Reuses the /api/system_status/grid_status builder.
+    """
+    return await get_api_grid_status()
 
 
 @router.get("/pw/aggregates")
@@ -1577,14 +1823,17 @@ async def pw_site_name():
 
 @router.get("/pw/alerts")
 async def pw_alerts():
-    """Alerts array/object."""
+    """Alerts list.
+
+    Old proxy shape: {"alerts": [...]} — wrapped in a dict.
+    """
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)
 
     if not status or not status.data:
-        return []
+        return {"alerts": []}
 
-    return status.data.alerts or []
+    return {"alerts": status.data.alerts or []}
 
 
 @router.get("/pw/is_connected")
@@ -1622,14 +1871,17 @@ async def pw_get_mode():
 
 @router.get("/pw/get_time_remaining")
 async def pw_get_time_remaining():
-    """Estimated backup time remaining."""
+    """Estimated backup time remaining.
+
+    Old proxy shape: {"time_remaining": <hours>}.
+    """
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)
 
     if not status or not status.data:
-        return {"time_remaining_hours": None}
+        return {"time_remaining": None}
 
-    return {"time_remaining_hours": status.data.time_remaining}
+    return {"time_remaining": status.data.time_remaining}
 
 
 # NOTE: No catch-all /api/{path:path} routes!
@@ -1752,6 +2004,8 @@ async def get_stats():
         "PW_GRACEFUL_DEGRADATION": settings.graceful_degradation,
         "PW_HEALTH_CHECK": settings.health_check,
         "PW_CACHE_TTL": settings.cache_ttl,
+        "PW_TEDAPI_RECOVERY": settings.tedapi_recovery,
+        "PW_TEDAPI_PROBE_INTERVAL": settings.tedapi_probe_interval,
     }
 
     # Build connection health section
@@ -1802,6 +2056,9 @@ async def get_stats():
         },
         "gateway_statuses": gateway_statuses,
     }
+
+    # Add SolarOnly fallback mode state for each tracked gateway
+    stats["fallback_mode"] = gateway_manager.get_all_fallback_states()
 
     # Add default gateway info for backward compatibility
     if gateway_manager.gateways:

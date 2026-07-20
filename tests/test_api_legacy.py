@@ -641,13 +641,11 @@ def test_api_operation_defaults_when_neither_mode_available(client, connected_ga
 
 
 def test_pw_level(client, connected_gateway):
-    """Test /pw/level returns battery percentage."""
+    """Test /pw/level returns raw battery percentage (old proxy shape)."""
     response = client.get("/pw/level")
     assert response.status_code == 200
     data = response.json()
-    assert "percentage" in data
-    assert "raw_percentage" in data
-    assert data["raw_percentage"] == 85.5
+    assert data == {"level": 85.5}
 
 
 def test_pw_power(client, connected_gateway):
@@ -678,21 +676,23 @@ def test_pw_solar(client, connected_gateway):
 
 
 def test_pw_battery(client, connected_gateway):
-    """Test /pw/battery returns battery power (legacy endpoint)."""
+    """Test /pw/battery returns the full battery meter block (old proxy shape)."""
     response = client.get("/pw/battery")
     assert response.status_code == 200
     data = response.json()
-    assert "power" in data
+    assert data["instant_power"] == -2000
 
 
 def test_pw_battery_blocks(client, connected_gateway):
-    """Test /pw/battery_blocks returns block details."""
+    """Test /pw/battery_blocks returns dict keyed by serial (old proxy shape)."""
     response = client.get("/pw/battery_blocks")
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data, list)
-    assert len(data) == 1
-    assert data[0]["PackageSerialNumber"] == "TG1234567890AB"
+    assert isinstance(data, dict)
+    assert "TG1234567890AB" in data
+    # Serial is the key, not a field in the block body
+    assert "PackageSerialNumber" not in data["TG1234567890AB"]
+    assert data["TG1234567890AB"]["PackagePartNumber"] == "1234567-00-A"
 
 
 def test_pw_load(client, connected_gateway):
@@ -770,11 +770,14 @@ def test_pw_version(client, connected_gateway):
 
 
 def test_pw_status(client, connected_gateway):
-    """Test /pw/status returns status summary."""
+    """Test /pw/status returns the full /api/status payload (old proxy shape)."""
     response = client.get("/pw/status")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "Running"
+    assert "din" in data
+    assert "version" in data
+    assert "start_time" in data
+    assert "can_reboot" in data
 
 
 def test_pw_system_status(client, connected_gateway):
@@ -787,11 +790,14 @@ def test_pw_system_status(client, connected_gateway):
 
 
 def test_pw_grid_status(client, connected_gateway):
-    """Test /pw/grid_status returns grid status."""
+    """Test /pw/grid_status returns the raw API payload (old proxy shape)."""
     response = client.get("/pw/grid_status")
     assert response.status_code == 200
     data = response.json()
-    assert data["grid_status"] == "UP"
+    assert "grid_status" in data
+    assert "grid_services_active" in data
+    # UP maps to the API-level SystemGridConnected value
+    assert data["grid_status"] == "SystemGridConnected"
 
 
 def test_pw_aggregates(client, connected_gateway):
@@ -814,11 +820,12 @@ def test_pw_site_name(client, connected_gateway):
 
 
 def test_pw_alerts(client, connected_gateway):
-    """Test /pw/alerts returns alerts array."""
+    """Test /pw/alerts returns alerts wrapped in a dict (old proxy shape)."""
     response = client.get("/pw/alerts")
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data, list)
+    assert isinstance(data, dict)
+    assert isinstance(data["alerts"], list)
 
 
 def test_pw_is_connected(client, connected_gateway):
@@ -848,11 +855,11 @@ def test_pw_get_mode(client, connected_gateway):
 
 
 def test_pw_get_time_remaining(client, connected_gateway):
-    """Test /pw/get_time_remaining returns estimated backup time."""
+    """Test /pw/get_time_remaining returns time_remaining (old proxy shape)."""
     response = client.get("/pw/get_time_remaining")
     assert response.status_code == 200
     data = response.json()
-    assert data["time_remaining_hours"] == 8.5
+    assert data["time_remaining"] == 8.5
 
 
 def test_pw_endpoints_no_gateway(client, mock_gateway_manager):

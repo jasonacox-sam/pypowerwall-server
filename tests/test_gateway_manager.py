@@ -6,6 +6,40 @@ from app.core.gateway_manager import gateway_manager
 from app.core.scaling import raw_to_tesla_battery_percent
 
 
+def _make_realistic_pw_mock() -> Mock:
+    """Build a pypowerwall connection mock with real numeric/dict return values.
+
+    A bare Mock() causes real code paths (e.g. the neg_solar correction's
+    `aggregates.get("solar", {}).get("instant_power", 0) < 0` comparison, or
+    battery percent scaling) to raise a TypeError comparing a Mock to an int.
+    That TypeError is treated as a genuine poll failure, driving the poll
+    loop into an endless exponential-backoff retry cycle for tests that
+    never actually care about polling behavior.
+    """
+    mock = Mock()
+    mock.poll.return_value = {
+        "site": {"instant_power": 100, "instant_reactive_power": 0},
+        "solar": {"instant_power": 500, "instant_reactive_power": 0},
+        "battery": {"instant_power": -200, "instant_reactive_power": 0},
+        "load": {"instant_power": 400, "instant_reactive_power": 0},
+    }
+    mock.level.return_value = 85.5
+    mock.freq.return_value = 60.0
+    mock.status.return_value = "Running"
+    mock.version.return_value = "23.44.0"
+    mock.vitals.return_value = {}
+    mock.strings.return_value = {}
+    mock.temps.return_value = {}
+    mock.alerts.return_value = []
+    mock.din.return_value = "1232100-00-E--T14111AB1234567"
+    mock.uptime.return_value = "1d 0h 0m"
+    mock.site_name.return_value = "Home"
+    mock.grid_status.return_value = "UP"
+    mock.is_connected.return_value = True
+    mock.tedapi = None
+    return mock
+
+
 def test_get_gateway(connected_gateway):
     """Test getting a gateway by ID."""
     status = gateway_manager.get_gateway("test-gateway")
@@ -604,7 +638,7 @@ async def test_initialize_creates_cloud_control(monkeypatch):
     """Test that initialize() creates a _cloud_control connection for TEDAPI+cloud config."""
     from app.config import GatewayConfig
 
-    mock_cloud = Mock()
+    mock_cloud = _make_realistic_pw_mock()
     call_count = 0
 
     def mock_powerwall_factory(**kwargs):
@@ -649,7 +683,7 @@ async def test_initialize_no_cloud_control_for_cloud_mode(monkeypatch):
     """Test that initialize() does NOT create _cloud_control for pure cloud-mode gateways."""
     from app.config import GatewayConfig
 
-    mock_cloud = Mock()
+    mock_cloud = _make_realistic_pw_mock()
 
     import pypowerwall
     monkeypatch.setattr(pypowerwall, "Powerwall", lambda **kw: mock_cloud)
@@ -687,7 +721,7 @@ async def test_initialize_cloud_control_uses_pw_authpath_fallback(monkeypatch):
 
     def mock_powerwall_factory(**kwargs):
         captured_kwargs.update(kwargs)
-        return Mock()
+        return _make_realistic_pw_mock()
 
     import pypowerwall
     monkeypatch.setattr(pypowerwall, "Powerwall", mock_powerwall_factory)

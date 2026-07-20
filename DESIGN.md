@@ -272,7 +272,7 @@ sequenceDiagram
 |--------|---------|-------------|
 | `app/main.py` | FastAPI app, lifespan, CLI | `app`, `cli()` |
 | `app/config.py` | Configuration via env vars | `settings`, `Settings`, `GatewayConfig` |
-| `app/core/gateway_manager.py` | Connection pooling, polling | `gateway_manager` (singleton) |
+| `app/core/gateway_manager.py` | Connection pooling, polling, TEDAPI probe/recovery | `gateway_manager` (singleton) |
 
 ### API Routers
 
@@ -446,6 +446,41 @@ def get_gateway(self, gateway_id: str):
     
     return status  # No data
 ```
+
+### TEDAPI SolarOnly Fallback & Auto-Recovery
+
+Distinct from transient-failure degradation above: pypowerwall's TEDAPI layer
+can silently fall back to SolarOnly mode (solar data continues, battery/grid
+data drops).  A per-gateway background probe task detects and recovers this
+state (ported from upstream proxy t97; enabled via `PW_TEDAPI_RECOVERY`,
+default `yes`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Probing: TEDAPI gateway registered
+    Probing --> Probing: pw.version() OK (every PW_TEDAPI_PROBE_INTERVAL s)
+    Probing --> SolarOnly: 3 consecutive probe failures
+    SolarOnly --> Recovering: backoff elapsed (60s → max 300s)
+    Recovering --> Probing: pw.connect() + verify OK
+    Recovering --> SolarOnly: recovery failed (double backoff)
+    SolarOnly --> Probing: POST /health/reset
+```
+
+**Key implementation points** (`gateway_manager._tedapi_probe_loop`):
+
+- One asyncio task per TEDAPI gateway (`tedapi-probe-{id}`), started in
+  `initialize()`, cancelled in `shutdown()` alongside poll tasks.
+- All pypowerwall calls (`pw.version()`, `pw.connect(retry=False)`) go through
+  the shared `ThreadPoolExecutor` with `asyncio.wait_for` timeouts — the probe
+  never blocks the event loop.
+- State is exposed via `get_fallback_state(id)` / `get_all_fallback_states()`
+  (snapshot copies, never live references) and surfaced in `/health` and
+  `/stats` under `fallback_mode`.  `POST /health/reset` (control-token
+  authenticated) clears state; the loop re-checks state after each backoff
+  sleep so a reset takes effect without waiting out the backoff.
+- Hybrid-mode caveat: in v1r + WiFi topologies `pw.version()` may be served by
+  the local API, so WiFi TEDAPI outage detection is best-effort there; pure
+  TEDAPI mode gets full coverage.
 
 ---
 

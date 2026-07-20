@@ -2,6 +2,49 @@
 
 ## Version History
 
+### [0.4.1] - 2026-07-19
+
+**Changed:**
+- **Bumped `pypowerwall` dependency to `0.16.2`** (from `0.15.12`). Key upstream changes across the four intermediate releases:
+  - **v0.15.13**: Fleet API transport upgraded to HTTP/2 + TLS 1.3; fix for TEDAPI WiFi backoff race condition in multi-threaded deployments; Docker base image switched from Alpine to Debian-slim to avoid musl libc TLS fingerprint rejection by Tesla after long-running token expiry.
+  - **v0.16.0**: Full codebase review sweep — 101 new regression tests, critical bug fixes (`set_operation` reserve scale, FleetAPI token refresh wedge, TEDAPI `available_blocks` always 0), security hardening (query-string bypass, open proxy, CSRF), 19 crash-on-None fixes, native lock-timeout performance improvements.
+  - **v0.16.1**: Windows TLS fix — caps TLS to 1.2 on Windows where OpenSSL TLS 1.3 fingerprint is rejected by Tesla during PKCE code exchange; Linux/macOS retain TLS 1.3 pinning.
+  - **v0.16.2**: TEDAPI SolarOnly fallback mode (`PW_TEDAPI_RECOVERY=yes`) — automatic fallback to solar-only data on TEDAPI connectivity loss with exponential-backoff recovery; v1r `PENDING_VERIFICATION`/`UNKNOWN_KEY_ID` auth warnings now surfaced at normal log level; v1r WiFi-fallback response normalization (fixes blank firmware version on LAN→WiFi failover).
+- **TEDAPI connection mode logged at startup** — the connect message now states the exact mode being used (`TEDAPI full (WiFi)`, `TEDAPI v1r`, `TEDAPI v1r + WiFi`, `Cloud`, `FleetAPI`) so users can immediately see which code path pypowerwall is taking.
+- **Warning when `PW_RSA_KEY_PATH` + `PW_GW_PWD` are set together without `PW_WIFI_HOST`** — this combination activates TEDAPI v1r mode without a WiFi fallback path, causing follower Powerwall data to appear as `null`. The warning names both remedies: add `PW_WIFI_HOST=<gateway-ip>` to keep v1r with WiFi follower fallback, or remove `PW_RSA_KEY_PATH` to switch to TEDAPI full mode.
+
+**Added:**
+- **TEDAPI SolarOnly fallback tracking and auto-recovery** — per-gateway background probe monitors TEDAPI health and detects SolarOnly fallback (when TEDAPI drops but solar data continues). After 3 consecutive failed probes, enters fallback mode and attempts `pw.connect()` recovery with exponential backoff (60s → max 300s). No restart, no data gap — the gateway keeps serving whatever data is available. Exposed via `fallback_mode` in `/health` and `/stats`, plus `POST /health/reset` to clear state. Config: `PW_TEDAPI_RECOVERY` (default: `yes`), `PW_TEDAPI_PROBE_INTERVAL` (default: `30`).
+- **`POST /health/reset` now requires `PW_CONTROL_SECRET`** — the endpoint mutates server state and is now gated by the same bearer token as `/control/*` endpoints, preventing unauthorised resets on exposed servers.
+- **12 missing API compatibility endpoints** — `regression_test.py` identified gaps vs the old pypowerwall proxy server ALLOWLIST. All are now implemented as cache-backed or static-stub endpoints so pypowerwall-server is a complete drop-in replacement:
+  - `/api/meters/site` — on-demand pypowerwall passthrough returning the synchrometer CT config (like `/tedapi/*` diagnostics)
+  - `/api/meters/solar` — returns the solar slice of cached aggregates as a list
+  - `/api/meters` — returns cached meter hardware config (empty list in TEDAPI mode)
+  - `/api/meters/readings` — stub `{}` (CT readings not available in TEDAPI/local mode)
+  - `/api/solars` and `/api/solars/brands` — cached inverter list + static brand list
+  - `/api/customer` — `{"registered": true}`
+  - `/api/installer` — Tesla installer stub (full old-proxy key set)
+  - `/api/system/update/status` — static "update_succeeded" stub with current cached firmware version
+  - `/api/site_info/grid_codes` — empty list (grid code enumeration not available in TEDAPI mode)
+  - `/api/synchrometer/ct_voltage_references` — static Phase1/Phase2 CT reference stub
+  - `/api/solar_powerwall` — cached solar_powerwall data or `{}`
+- **`regression_test.py`** — A/B endpoint comparison tool for hardware verification against the old proxy. Compares all ~76 non-control endpoints between two running instances, with structural-drift FAILs, value-drift WARNs, and volatile-field filtering. Usage: `python3 regression_test.py --old http://old-proxy:8675 --new http://localhost:8675`.
+
+**Fixed (live-hardware A/B verification against proxy t95):**
+- **`/pod` POD vitals fields were `null` on PW3** — the TEPOD serial matcher only looked for a `serialNumber` field inside vitals data, but live PW3 TEDAPI vitals carry the serial only in the device key (`TEPOD--{part}--{serial}`). Now falls back to the key-embedded serial, restoring `POD_ActiveHeating`, `POD_ChargeRequest`, `POD_nom_energy_to_be_charged`, etc.
+- **8 `/pw/*` endpoints returned invented shapes** — now byte-compatible with the old proxy's `pw.*` library mappings:
+  - `/pw/level` → `{"level": <raw soe>}` (was `{"percentage", "raw_percentage"}`)
+  - `/pw/battery` → full battery meter block from aggregates (was `{"power": N}`)
+  - `/pw/battery_blocks` → dict keyed by serial + TETHC temperature merge (was a list)
+  - `/pw/strings` → verbose PVAC-device format with PVS string injection (was simplified letter format)
+  - `/pw/status` → full `/api/status` payload (was `{"status": ...}`)
+  - `/pw/grid_status` → raw API payload with `grid_services_active` (was simplified `UP`/`DOWN`)
+  - `/pw/alerts` → `{"alerts": [...]}` wrapper (was bare list)
+  - `/pw/get_time_remaining` → key `time_remaining` (was `time_remaining_hours`)
+- **`/api/sitemaster`** — added missing `power_supply_mode` and `can_reboot` keys
+- **`/api/customer/registration`** — now returns the old proxy's disabled response (`{"status": "404 Response - API Disabled"}`) instead of mock PII fields
+- A/B regression vs live proxy t95: 21 structural failures → 8, all remaining diffs are intentional improvements (real data where the old proxy returns `null`/`TIMEOUT!` sentinels) or by-design server differences (`/stats`, `/health`)
+
 ### [0.4.0] - 2026-07-01
 
 **Security:**

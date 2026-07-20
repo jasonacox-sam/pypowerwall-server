@@ -129,6 +129,9 @@ class PowerwallData(BaseModel):
     fan_speeds: Optional[Dict[str, Any]] = None  # Fan speed data from TEDAPI
     networks: Optional[List[Any]] = None  # Network configuration
     powerwalls: Optional[Dict[str, Any]] = None  # Powerwalls list
+    meters: Optional[List[Any]] = None  # Meter hardware config (/api/meters)
+    solars: Optional[List[Any]] = None  # Solar inverter list (/api/solars)
+    solar_powerwall: Optional[Dict[str, Any]] = None  # Solar+PW data (/api/solar_powerwall)
     soe_raw: Optional[float] = None  # Raw State of Energy from Tesla/pypowerwall
     soe: Optional[float] = None  # Tesla-displayed State of Energy
     freq: Optional[float] = None

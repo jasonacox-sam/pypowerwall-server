@@ -58,6 +58,8 @@ Environment Variables (Proxy Compatible):
         PW_GRACEFUL_DEGRADATION     - Use cached data when unavailable (default: "yes")
         PW_HEALTH_CHECK             - Enable health monitoring (default: "yes")
         PW_CACHE_TTL                - Max cached data age in seconds (default: 30)
+        PW_TEDAPI_RECOVERY          - Auto-recover TEDAPI SolarOnly fallback (default: "yes")
+        PW_TEDAPI_PROBE_INTERVAL    - Seconds between TEDAPI health probes (default: 30)
     
     UI and Advanced:
         PW_STYLE             - UI style: clear/black/white/grafana/grafana-dark (default: "clear")
@@ -176,7 +178,7 @@ from pydantic_settings import BaseSettings
 logger = logging.getLogger(__name__)
 
 # Server version
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.4.1"
 
 
 class GatewayConfig(BaseModel):
@@ -259,6 +261,14 @@ class Settings(BaseSettings):
     graceful_degradation: bool = Field(default=True, alias="PW_GRACEFUL_DEGRADATION")
     health_check: bool = Field(default=True, alias="PW_HEALTH_CHECK")
     cache_ttl: int = Field(default=30, alias="PW_CACHE_TTL")  # Max age for cached data
+
+    # TEDAPI SolarOnly fallback recovery
+    tedapi_recovery: bool = Field(
+        default=True, alias="PW_TEDAPI_RECOVERY"
+    )  # Auto-recover TEDAPI connection when SolarOnly fallback is detected
+    tedapi_probe_interval: int = Field(
+        default=30, alias="PW_TEDAPI_PROBE_INTERVAL"
+    )  # Seconds between TEDAPI health probes
 
     # UI and advanced settings
     style: str = Field(default="clear", alias="PW_STYLE")

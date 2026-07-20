@@ -57,10 +57,14 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+from typing import Optional
+
+from app.api.auth import verify_control_token
 
 from app.config import settings, SERVER_VERSION
 from app.api import legacy, gateways, aggregates, websockets
@@ -641,13 +645,13 @@ async def health_check():
         if is_online:
             online_count += 1
 
-        gateway_details.append(
-            {
-                "id": gateway_id,
-                "online": is_online,
-                "error": status.error if status and status.error else None,
-            }
-        )
+        detail = {
+            "id": gateway_id,
+            "online": is_online,
+            "error": status.error if status and status.error else None,
+        }
+
+        gateway_details.append(detail)
 
     # Determine overall health
     if online_count == total:
@@ -657,6 +661,9 @@ async def health_check():
     else:
         health_status = "unhealthy"
 
+    # SolarOnly fallback state per tracked gateway (upstream proxy t97 format)
+    fallback_summary = gateway_manager.get_all_fallback_states()
+
     return {
         "status": health_status,
         "version": SERVER_VERSION,
@@ -665,7 +672,21 @@ async def health_check():
         "gateways_offline": total - online_count,
         "gateway_ids": list(gateway_manager.gateways.keys()),
         "gateway_details": gateway_details,
+        "fallback_mode": fallback_summary,
     }
+
+
+@app.post("/health/reset", tags=["Health"])
+async def reset_health(authorization: Optional[str] = Header(None)):
+    """Reset SolarOnly fallback state for all gateways.
+
+    Clears fallback tracking counters and allows a fresh probe cycle.
+    Requires ``PW_CONTROL_SECRET`` bearer token (same as ``/control/*``
+    endpoints) to prevent unauthorised state resets on exposed servers.
+    """
+    verify_control_token(authorization)
+    gateway_manager.reset_fallback_state()
+    return {"status": "ok", "message": "SolarOnly fallback state reset for all gateways"}
 
 
 def cli():

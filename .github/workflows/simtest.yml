@@ -2,6 +2,8 @@ name: Simulator
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -16,6 +18,7 @@ jobs:
   determine-image:
     name: "Determine Image"
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       image-owner: ${{ steps.set-owner.outputs.owner }}
     steps:
@@ -40,6 +43,7 @@ jobs:
     name: "Python ${{ matrix.python-version }}"
     needs: determine-image
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     strategy:
       matrix:
