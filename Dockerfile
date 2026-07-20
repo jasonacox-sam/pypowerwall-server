@@ -7,10 +7,12 @@
 ARG TARGETARCH
 ARG TARGETVARIANT
 
-# Base images per platform — arm/v7 and arm/v8 (32-bit ARM, Raspberry Pi) need
-# slim-bookworm; amd64 and arm64 use the smaller alpine image.
-FROM python:3.12-alpine AS base-amd64
-FROM python:3.12-alpine AS base-arm64
+# Base images per platform — all targets use Debian-slim (not Alpine) to avoid
+# the musl libc TLS fingerprint that Tesla rejects on long-running token
+# refresh (see RELEASE.md v0.15.13 and pypowerwall#344). This matches the
+# base image strategy used by the pypowerwall proxy's own Dockerfile.
+FROM python:3.12-slim-bookworm AS base-amd64
+FROM python:3.12-slim-bookworm AS base-arm64
 FROM python:3.12-slim-bookworm AS base-armv7
 FROM python:3.12-slim-bookworm AS base-armv8
 FROM base-${TARGETARCH}${TARGETVARIANT}
@@ -18,38 +20,25 @@ FROM base-${TARGETARCH}${TARGETVARIANT}
 WORKDIR /app
 
 # Install build dependencies, pip packages, then clean up.
-# wget is kept as a runtime dependency for the HEALTHCHECK below.
-# Package manager differs by base image (apk on Alpine, apt on Debian).
+# wget is kept as a runtime dependency for the HEALTHCHECK below; tini is kept
+# as the PID 1 entrypoint (see ENTRYPOINT below) for correct signal forwarding
+# and zombie reaping.
 COPY requirements.txt .
-RUN if command -v apk > /dev/null; then \
-      apk add --no-cache --virtual .build-deps \
-          gcc \
-          python3-dev \
-          make \
-          automake \
-          autoconf \
-          libtool \
-          musl-dev \
-          linux-headers && \
-      apk add --no-cache wget && \
-      pip install --no-cache-dir -r requirements.txt && \
-      apk del .build-deps; \
-    else \
-      apt-get update && \
-      apt-get install -y --no-install-recommends \
-          gcc \
-          python3-dev \
-          make \
-          automake \
-          autoconf \
-          libtool \
-          libffi-dev \
-          wget && \
-      pip install --no-cache-dir -r requirements.txt && \
-      apt-get purge -y gcc python3-dev make automake autoconf libtool libffi-dev && \
-      apt-get autoremove -y && \
-      rm -rf /var/lib/apt/lists/*; \
-    fi
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        python3-dev \
+        make \
+        automake \
+        autoconf \
+        libtool \
+        libffi-dev \
+        wget \
+        tini && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apt-get purge -y gcc python3-dev make automake autoconf libtool libffi-dev && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy application
 COPY app/ ./app/
@@ -64,5 +53,7 @@ EXPOSE 8675
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD wget --spider -q http://localhost:8675/health || exit 1
 
-# Run the application
+# Run under tini as PID 1 so signals (e.g. SIGTERM) are forwarded correctly to
+# uvicorn for graceful shutdown, and any orphaned child processes are reaped.
+ENTRYPOINT ["tini", "--"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8675"]
