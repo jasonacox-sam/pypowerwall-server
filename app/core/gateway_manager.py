@@ -467,24 +467,69 @@ class GatewayManager:
                     f"Cloud control connection failed (control will be unavailable): {e}"
                 )
 
+    async def _cancel_task_with_retry(
+        self,
+        task: asyncio.Task,
+        name: str,
+        attempt_timeout: float = 0.5,
+        max_attempts: int = 6,
+    ):
+        """Cancel a task, re-issuing cancel() until it actually stops.
+
+        A single Task.cancel() call is not always sufficient: if the task is
+        currently awaiting a run_in_executor() future whose underlying
+        concurrent.futures.Future has already started running in a worker
+        thread, that future's cancel() is a no-op (can't interrupt a running
+        thread), and asyncio silently drops the cancellation request instead
+        of retrying it. The task then keeps running past its next await
+        point as if nothing happened. Re-issuing cancel() on a short timer
+        catches it the next time the task is at a genuinely cancellable
+        suspension point (e.g. asyncio.sleep()).
+        """
+        for attempt in range(max_attempts):
+            if task.done():
+                break
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=attempt_timeout)
+                break
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug(f"Task '{name}' error during shutdown: {e}")
+                break
+        else:
+            logger.warning(
+                f"Task '{name}' did not stop after {max_attempts} cancellation "
+                f"attempts (~{max_attempts * attempt_timeout:.1f}s); abandoning it"
+            )
+
     async def shutdown(self):
         """Shutdown gateway manager and cleanup resources."""
         # Stop polling first so no new MQTT publishes are scheduled,
         # then cancel any in-flight publish tasks.
-        tasks = list(self._poll_tasks.values())
-        tasks.extend(self._probe_tasks.values())
+        named_tasks = [(t, f"poll-{gid}") for gid, t in self._poll_tasks.items()]
+        named_tasks.extend(
+            (t, f"tedapi-probe-{gid}") for gid, t in self._probe_tasks.items()
+        )
         if self._cloud_control_task:
-            tasks.append(self._cloud_control_task)
-        tasks.extend(self._mqtt_tasks.values())
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.debug(f"Task error during shutdown: {e}")
+            named_tasks.append((self._cloud_control_task, "cloud-control-init"))
+        named_tasks.extend(
+            (t, f"mqtt-{gid}") for gid, t in self._mqtt_tasks.items()
+        )
+
+        # Cancel all tasks concurrently so one slow-to-cancel task doesn't
+        # delay cancellation of the others.
+        await asyncio.gather(
+            *(
+                self._cancel_task_with_retry(task, name)
+                for task, name in named_tasks
+            ),
+            return_exceptions=True,
+        )
+
         self._poll_tasks.clear()
         self._probe_tasks.clear()
         self._mqtt_tasks.clear()
