@@ -1154,6 +1154,18 @@ class GatewayManager:
         snapshot["recovery_enabled"] = settings.tedapi_recovery
         return snapshot
 
+    def get_all_fallback_states(self) -> Dict[str, Dict]:
+        """Get fallback state snapshots for all tracked gateways.
+
+        Returns:
+            Dict mapping gateway_id → fallback state snapshot (see
+            get_fallback_state).  Empty dict when no gateways are tracked.
+        """
+        return {
+            gw_id: self.get_fallback_state(gw_id)
+            for gw_id in self._fallback_state
+        }
+
     def reset_fallback_state(self, gateway_id: Optional[str] = None):
         """Reset fallback state for one or all gateways."""
         ids = [gateway_id] if gateway_id else list(self._fallback_state.keys())
@@ -1292,7 +1304,7 @@ class GatewayManager:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.debug(
+                logger.warning(
                     "TEDAPI probe/recovery task unexpected error for %s: %s",
                     gateway_id, exc,
                 )

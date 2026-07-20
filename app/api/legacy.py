@@ -1972,11 +1972,7 @@ async def get_stats():
     }
 
     # Add SolarOnly fallback mode state for each tracked gateway
-    fallback_summary = {
-        gw_id: gateway_manager.get_fallback_state(gw_id)
-        for gw_id in gateway_manager._fallback_state
-    }
-    stats["fallback_mode"] = fallback_summary
+    stats["fallback_mode"] = gateway_manager.get_all_fallback_states()
 
     # Add default gateway info for backward compatibility
     if gateway_manager.gateways:
