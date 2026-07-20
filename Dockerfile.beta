@@ -7,10 +7,12 @@
 ARG TARGETARCH
 ARG TARGETVARIANT
 
-# Base images per platform — arm/v7 and arm/v8 (32-bit ARM, Raspberry Pi) need
-# slim-bookworm; amd64 and arm64 use the smaller alpine image.
-FROM python:3.12-alpine AS base-amd64
-FROM python:3.12-alpine AS base-arm64
+# Base images per platform — all targets use Debian-slim (not Alpine) to avoid
+# the musl libc TLS fingerprint that Tesla rejects on long-running token
+# refresh (see RELEASE.md v0.15.13 and pypowerwall#344). This matches the
+# base image strategy used by the pypowerwall proxy's own Dockerfile.
+FROM python:3.12-slim-bookworm AS base-amd64
+FROM python:3.12-slim-bookworm AS base-arm64
 FROM python:3.12-slim-bookworm AS base-armv7
 FROM python:3.12-slim-bookworm AS base-armv8
 FROM base-${TARGETARCH}${TARGETVARIANT}
@@ -20,43 +22,25 @@ WORKDIR /app
 # Install all requirements including pypowerwall (to pull in its transitive deps),
 # then install the local pypowerwall's own deps (may be ahead of the pinned release).
 # Copy the local pypowerwall source tree and shadow it via PYTHONPATH.
-# Package manager differs by base image (apk on Alpine, apt on Debian).
+# tini is kept as the PID 1 entrypoint (see ENTRYPOINT below).
 COPY requirements.txt .
-RUN if command -v apk > /dev/null; then \
-      apk add --no-cache --virtual .build-deps \
-          gcc \
-          python3-dev \
-          make \
-          automake \
-          autoconf \
-          libtool \
-          musl-dev \
-          linux-headers \
-          libffi-dev && \
-      apk add --no-cache wget && \
-      pip install --no-cache-dir -r requirements.txt && \
-      pip install --no-cache-dir \
-          "protobuf>=3.20.0" python-dotenv pyroute2 \
-          python-dateutil requests-oauthlib websocket-client cryptography && \
-      apk del .build-deps; \
-    else \
-      apt-get update && \
-      apt-get install -y --no-install-recommends \
-          gcc \
-          python3-dev \
-          libffi-dev \
-          make \
-          automake \
-          autoconf \
-          libtool && \
-      pip install --no-cache-dir -r requirements.txt && \
-      pip install --no-cache-dir \
-          "protobuf>=3.20.0" python-dotenv pyroute2 \
-          python-dateutil requests-oauthlib websocket-client cryptography && \
-      apt-get purge -y gcc python3-dev libffi-dev make automake autoconf libtool && \
-      apt-get autoremove -y && \
-      rm -rf /var/lib/apt/lists/*; \
-    fi
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        python3-dev \
+        libffi-dev \
+        make \
+        automake \
+        autoconf \
+        libtool \
+        tini && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir \
+        "protobuf>=3.20.0" python-dotenv pyroute2 \
+        python-dateutil requests-oauthlib websocket-client cryptography && \
+    apt-get purge -y gcc python3-dev libffi-dev make automake autoconf libtool && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy local pypowerwall source tree — shadows the pip-installed version via PYTHONPATH
 COPY pypowerwall/ ./pypowerwall/
@@ -70,5 +54,7 @@ COPY app/ ./app/
 # Expose port
 EXPOSE 8675
 
-# Run the application
+# Run under tini as PID 1 so signals (e.g. SIGTERM) are forwarded correctly to
+# uvicorn for graceful shutdown, and any orphaned child processes are reaped.
+ENTRYPOINT ["tini", "--"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8675"]
