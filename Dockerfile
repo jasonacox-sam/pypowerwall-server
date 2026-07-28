@@ -20,9 +20,10 @@ FROM base-${TARGETARCH}${TARGETVARIANT}
 WORKDIR /app
 
 # Install build dependencies, pip packages, then clean up.
-# wget is kept as a runtime dependency for the HEALTHCHECK below; tini is kept
-# as the PID 1 entrypoint (see ENTRYPOINT below) for correct signal forwarding
-# and zombie reaping.
+# wget and curl are kept as runtime dependencies for health checks — the
+# Dockerfile HEALTHCHECK uses wget, but Powerwall-Dashboard's docker-compose
+# overrides the healthcheck with curl. tini is kept as the PID 1 entrypoint
+# (see ENTRYPOINT below) for correct signal forwarding and zombie reaping.
 COPY requirements.txt .
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -33,6 +34,7 @@ RUN apt-get update && \
         autoconf \
         libtool \
         libffi-dev \
+        curl \
         wget \
         tini && \
     pip install --no-cache-dir -r requirements.txt && \
