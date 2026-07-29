@@ -2,6 +2,15 @@
 
 ## Version History
 
+### [0.4.2] - 2026-07-19
+
+**Changed:**
+- **Gateway site name now shown on successful connection** — the startup/reconnect log line appends the Tesla-reported site name (e.g. `Successfully connected to gateway default (10.0.1.40) - Site: My Powerwall`) for easier multi-gateway identification. Falls back to the original message when `site_name` is unavailable.
+- **Sanitized external input in log output** — `site_name` (sourced from the gateway) is stripped of control characters before logging to prevent log forging.
+
+**Fixed:**
+- **Removed unused `aiohttp` dependency** — resolved all 29 open Dependabot alerts by eliminating the vestigial package entirely (was not referenced anywhere in `app/`, `tests/`, or `mqtt-tools/`).
+
 ### [0.4.1] - 2026-07-19
 
 **Changed:**
