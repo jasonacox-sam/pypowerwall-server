@@ -140,6 +140,26 @@ Base path: `{MQTT_TOPIC_PREFIX}/{gateway_id}/`
 | `pypowerwall/{gw}/reserve` | `20.0` | `%` |
 | `pypowerwall/{gw}/online` | `true` or `false` | — |
 
+### Lifetime energy topics (Wh accumulators)
+
+Lifetime energy totals from `/api/meters/aggregates` — on PW3/TEDAPI these are
+populated by `pypowerwall>=0.16.5` (overlaid from the gateway's native local API,
+see pypowerwall PR #372); PW2/local mode has always carried them. Gateways whose
+firmware lacks the endpoint report `0`, mirroring the HTTP API.
+
+| Topic | Value | Unit |
+|-------|-------|------|
+| `pypowerwall/{gw}/grid_energy_imported` | `4902666` | `Wh` (lifetime grid import) |
+| `pypowerwall/{gw}/grid_energy_exported` | `1469391` | `Wh` (lifetime grid export) |
+| `pypowerwall/{gw}/home_energy_imported` | `11679089` | `Wh` (lifetime home consumption) |
+| `pypowerwall/{gw}/solar_energy_exported` | `8337073` | `Wh` (lifetime solar production) |
+| `pypowerwall/{gw}/battery_energy_imported` | `4803385` | `Wh` (lifetime battery charged) |
+| `pypowerwall/{gw}/battery_energy_exported` | `4712126` | `Wh` (lifetime battery discharged) |
+
+*These are lifetime totals (same semantics as PW2's counters) — daily-energy
+dashboards should delta them, or use the HA Energy dashboard which does this
+automatically via `state_class: total_increasing`.*
+
 ### Full JSON topics (for advanced consumers)
 
 | Topic | Value |

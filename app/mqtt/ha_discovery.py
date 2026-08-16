@@ -29,6 +29,14 @@ Solar string sensors (when string_ids provided):
     strings/{AB}/current  — Paired-string current (A, sum of pair)
     strings/{AB}/power    — Paired-string power (W, sum of pair)
 
+Lifetime energy sensors (Wh, device_class=energy, state_class=total_increasing):
+    grid_energy_imported     — Grid energy imported, lifetime (from aggregates site)
+    grid_energy_exported     — Grid energy exported, lifetime (from aggregates site)
+    home_energy_imported     — Home energy consumption, lifetime (from aggregates load)
+    solar_energy_exported    — Solar energy production, lifetime (from aggregates solar)
+    battery_energy_imported  — Battery energy charged, lifetime
+    battery_energy_exported  — Battery energy discharged, lifetime
+
 Text sensors:
     grid_status — "UP" | "DOWN" | "unknown"
     mode        — Operation mode string (e.g. "self_consumption", "backup")
@@ -222,6 +230,59 @@ def build_discovery_payloads(
             unit="%",
             state_class="measurement",
             icon="mdi:battery-lock",
+        ),
+        # --- Lifetime energy sensors (Wh, total_increasing) ---
+        # Lifetime accumulators from /api/meters/aggregates — on PW3/TEDAPI
+        # these are overlaid by pypowerwall>=0.16.5 from the gateway's native
+        # local API.  state_class=total_increasing lets the HA Energy dashboard
+        # chart them directly (daily stats are derived by delta, same as PW2).
+        sensor(
+            "grid_energy_imported", "Grid Energy Imported",
+            f"{data_prefix}/grid_energy_imported",
+            unit="Wh",
+            device_class="energy",
+            state_class="total_increasing",
+            icon="mdi:transmission-tower-import",
+        ),
+        sensor(
+            "grid_energy_exported", "Grid Energy Exported",
+            f"{data_prefix}/grid_energy_exported",
+            unit="Wh",
+            device_class="energy",
+            state_class="total_increasing",
+            icon="mdi:transmission-tower-export",
+        ),
+        sensor(
+            "home_energy_imported", "Home Energy Consumption",
+            f"{data_prefix}/home_energy_imported",
+            unit="Wh",
+            device_class="energy",
+            state_class="total_increasing",
+            icon="mdi:home-lightning-bolt",
+        ),
+        sensor(
+            "solar_energy_exported", "Solar Energy Production",
+            f"{data_prefix}/solar_energy_exported",
+            unit="Wh",
+            device_class="energy",
+            state_class="total_increasing",
+            icon="mdi:solar-power",
+        ),
+        sensor(
+            "battery_energy_imported", "Battery Energy Charged",
+            f"{data_prefix}/battery_energy_imported",
+            unit="Wh",
+            device_class="energy",
+            state_class="total_increasing",
+            icon="mdi:battery-charging",
+        ),
+        sensor(
+            "battery_energy_exported", "Battery Energy Discharged",
+            f"{data_prefix}/battery_energy_exported",
+            unit="Wh",
+            device_class="energy",
+            state_class="total_increasing",
+            icon="mdi:battery-minus",
         ),
         # --- Text sensors ---
         sensor(

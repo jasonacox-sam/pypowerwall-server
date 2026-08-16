@@ -45,6 +45,13 @@ Topic layout
     {prefix}/{gateway_id}/status          JSON   — summary dict
     {prefix}/{gateway_id}/availability    str    — "online" | "offline" (LWT)
 
+    {prefix}/{gateway_id}/grid_energy_imported     float — Wh, lifetime grid import
+    {prefix}/{gateway_id}/grid_energy_exported     float — Wh, lifetime grid export
+    {prefix}/{gateway_id}/home_energy_imported     float — Wh, lifetime home consumption
+    {prefix}/{gateway_id}/solar_energy_exported    float — Wh, lifetime solar production
+    {prefix}/{gateway_id}/battery_energy_imported  float — Wh, lifetime battery charged
+    {prefix}/{gateway_id}/battery_energy_exported  float — Wh, lifetime battery discharged
+
     {prefix}/{gateway_id}/strings/{A-F}/voltage   float — V
     {prefix}/{gateway_id}/strings/{A-F}/current   float — A
     {prefix}/{gateway_id}/strings/{A-F}/power     float — W
@@ -262,6 +269,29 @@ class MqttPublisher:
                         json.dumps(agg),
                         retain, qos,
                     )
+
+                    # Lifetime energy accumulators (Wh).  PW3/TEDAPI gateways
+                    # get these overlaid onto aggregates by pypowerwall>=0.16.5
+                    # (native gateway endpoint); PW2/local mode has always
+                    # carried them.  Topic names follow the server's scalar
+                    # power convention (site -> grid, load -> home) and mirror
+                    # exactly what /api/meters/aggregates reports — including
+                    # 0 on gateways whose firmware lacks the endpoint.
+                    for topic_suffix, section, field in (
+                        ("grid_energy_imported", "site", "energy_imported"),
+                        ("grid_energy_exported", "site", "energy_exported"),
+                        ("home_energy_imported", "load", "energy_imported"),
+                        ("solar_energy_exported", "solar", "energy_exported"),
+                        ("battery_energy_imported", "battery", "energy_imported"),
+                        ("battery_energy_exported", "battery", "energy_exported"),
+                    ):
+                        energy_val = _extract_energy(agg, section, field)
+                        if energy_val is not None:
+                            await self._safe_publish(
+                                f"{prefix}/{topic_suffix}",
+                                f"{energy_val:.0f}",
+                                retain, qos,
+                            )
 
                 if data.grid_status is not None:
                     await self._safe_publish(
@@ -544,6 +574,15 @@ def _extract_power(aggregates: dict, key: str) -> Optional[float]:
         return float(aggregates[key]["instant_power"])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _extract_energy(aggregates: dict, section: str, field: str) -> Optional[float]:
+    """Safely extract a lifetime energy accumulator (Wh) from aggregates."""
+    try:
+        val = aggregates[section][field]
+    except (KeyError, TypeError):
+        return None
+    return _safe_float(val)
 
 
 # Module-level singleton — imported by gateway_manager and main.py
