@@ -75,7 +75,7 @@ async def get_aggregate_power():
 
     Response includes:
         - site: Total site power (grid interaction)
-        - battery: Total battery power (+ charging, - discharging)
+        - battery: Total battery power (+ discharging, - charging)
         - load: Total home/facility load consumption
         - solar: Total solar generation
         - grid: Total grid import/export
