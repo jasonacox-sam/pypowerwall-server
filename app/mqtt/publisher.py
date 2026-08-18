@@ -45,12 +45,12 @@ Topic layout
     {prefix}/{gateway_id}/status          JSON   — summary dict
     {prefix}/{gateway_id}/availability    str    — "online" | "offline" (LWT)
 
-    {prefix}/{gateway_id}/grid_energy_imported     float — Wh, lifetime grid import
-    {prefix}/{gateway_id}/grid_energy_exported     float — Wh, lifetime grid export
-    {prefix}/{gateway_id}/home_energy_imported     float — Wh, lifetime home consumption
-    {prefix}/{gateway_id}/solar_energy_exported    float — Wh, lifetime solar production
-    {prefix}/{gateway_id}/battery_energy_imported  float — Wh, lifetime battery charged
-    {prefix}/{gateway_id}/battery_energy_exported  float — Wh, lifetime battery discharged
+    {prefix}/{gateway_id}/grid_energy_imported     int — Wh, lifetime grid import (whole Wh, no decimals)
+    {prefix}/{gateway_id}/grid_energy_exported     int — Wh, lifetime grid export (whole Wh, no decimals)
+    {prefix}/{gateway_id}/home_energy_imported     int — Wh, lifetime home consumption (whole Wh, no decimals)
+    {prefix}/{gateway_id}/solar_energy_exported    int — Wh, lifetime solar production (whole Wh, no decimals)
+    {prefix}/{gateway_id}/battery_energy_imported  int — Wh, lifetime battery charged (whole Wh, no decimals)
+    {prefix}/{gateway_id}/battery_energy_exported  int — Wh, lifetime battery discharged (whole Wh, no decimals)
 
     {prefix}/{gateway_id}/strings/{A-F}/voltage   float — V
     {prefix}/{gateway_id}/strings/{A-F}/current   float — A
@@ -576,7 +576,7 @@ def _extract_power(aggregates: dict, key: str) -> Optional[float]:
         return None
 
 
-def _extract_energy(aggregates: dict, section: str, field: str) -> Optional[float]:
+def _extract_energy(aggregates: Optional[dict], section: str, field: str) -> Optional[float]:
     """Safely extract a lifetime energy accumulator (Wh) from aggregates."""
     try:
         val = aggregates[section][field]

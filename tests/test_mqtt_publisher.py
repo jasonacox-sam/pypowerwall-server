@@ -666,4 +666,4 @@ class TestExtractEnergy:
         assert _extract_energy(agg, "solar", "energy_exported") is None
 
     def test_none_aggregates(self):
-        assert _extract_energy(None, "site", "energy_imported") is None  # type: ignore[arg-type]
+        assert _extract_energy(None, "site", "energy_imported") is None

@@ -282,7 +282,7 @@ class TestBuildDiscoveryPayloads:
             string_ids=string_ids,
         )
         payloads = {t: json.loads(p) for t, p in results}
-        # 11 base + 2×3 per-string + 1 pair (AB) × 3 = 11 + 6 + 3 = 20
+        # 17 base + 2×3 per-string + 1 pair (AB) × 3 = 17 + 6 + 3 = 26
         assert len(results) == 26
         # AB pair present
         assert "homeassistant/sensor/pypowerwall_home_string_ab_voltage/config" in payloads
@@ -301,7 +301,7 @@ class TestBuildDiscoveryPayloads:
             string_ids=string_ids,
         )
         payloads = {t: json.loads(p) for t, p in results}
-        # 11 base + 12×3 per-string + 6 pairs × 3 = 11 + 36 + 18 = 65
+        # 17 base + 12×3 per-string + 6 pairs × 3 = 17 + 36 + 18 = 71
         assert len(results) == 71
         # Spot-check numbered pair AB1
         assert "homeassistant/sensor/pypowerwall_home_string_ab1_voltage/config" in payloads
