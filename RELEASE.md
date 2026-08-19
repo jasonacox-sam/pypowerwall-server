@@ -10,6 +10,9 @@
 **Changed:**
 - **Bumped `pypowerwall` dependency to `0.16.5`** (from `0.16.2`). On PW3/TEDAPI this release overlays the lifetime `energy_imported` / `energy_exported` accumulators onto `/api/meters/aggregates` using the gateway's native local API (customer login), with thread-safety hardening (bounded lock acquisition, double-checked cache, host affinity) — see pypowerwall PR #372. This is what populates the new energy topics on PW3; PW2/local mode has always carried these fields.
 
+**Fixed:**
+- **Corrected battery sign convention in the `/api/aggregate/power` docstring** — it stated the convention backwards (+ charging, - discharging); actual behavior, consistent with `/api/aggregate/battery` and the rest of the codebase, is positive = discharging, negative = charging. Thanks to @tassieKev for catching the typo (#76).
+
 ### [0.4.2] - 2026-07-19
 
 **Changed:**
