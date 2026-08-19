@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.models.gateway import Gateway, GatewayStatus, PowerwallData
-from app.mqtt.publisher import MqttPublisher, _extract_power
+from app.mqtt.publisher import MqttPublisher, _extract_energy, _extract_power
 
 
 # ---------------------------------------------------------------------------
@@ -574,3 +574,96 @@ class TestMqttStringTopics:
 
         # Individual A1 topic also published
         assert published["pypowerwall/test-gw/strings/A1/voltage"] == "310.00"
+
+
+# ---------------------------------------------------------------------------
+# Lifetime energy accumulator topics (Wh) — pypowerwall>=0.16.5 PW3 overlay
+# ---------------------------------------------------------------------------
+
+def _status_with_energy() -> GatewayStatus:
+    """Status whose aggregates carry lifetime energy fields (PW3, pypowerwall>=0.16.5)."""
+    status = make_status()
+    agg = status.data.aggregates
+    agg["site"]["energy_imported"] = 4902666.25
+    agg["site"]["energy_exported"] = 1469391.0
+    agg["load"]["energy_imported"] = 11679089.0
+    agg["solar"]["energy_exported"] = 8337073.0
+    agg["battery"]["energy_imported"] = 4803385.0
+    agg["battery"]["energy_exported"] = 4712126.0
+    return status
+
+
+class TestLifetimeEnergyTopics:
+    @pytest.mark.asyncio
+    async def test_energy_topics_published(self, monkeypatch):
+        """All six lifetime energy topics are published with integer-Wh payloads."""
+        pub = TestMqttPublisherEnabled()._make_publisher(monkeypatch)
+        mock_client = AsyncMock()
+        pub._client = mock_client
+        pub._connected = True
+
+        await pub.publish_gateway("test-gw", _status_with_energy())
+
+        published = {c.args[0]: c.args[1] for c in mock_client.publish.call_args_list}
+        assert published["pypowerwall/test-gw/grid_energy_imported"] == "4902666"
+        assert published["pypowerwall/test-gw/grid_energy_exported"] == "1469391"
+        assert published["pypowerwall/test-gw/home_energy_imported"] == "11679089"
+        assert published["pypowerwall/test-gw/solar_energy_exported"] == "8337073"
+        assert published["pypowerwall/test-gw/battery_energy_imported"] == "4803385"
+        assert published["pypowerwall/test-gw/battery_energy_exported"] == "4712126"
+
+    @pytest.mark.asyncio
+    async def test_energy_topics_absent_when_fields_missing(self, monkeypatch):
+        """Legacy aggregates without energy fields publish no energy topics."""
+        pub = TestMqttPublisherEnabled()._make_publisher(monkeypatch)
+        mock_client = AsyncMock()
+        pub._client = mock_client
+        pub._connected = True
+
+        await pub.publish_gateway("test-gw", make_status())
+
+        published = {c.args[0] for c in mock_client.publish.call_args_list}
+        for suffix in (
+            "grid_energy_imported", "grid_energy_exported",
+            "home_energy_imported", "solar_energy_exported",
+            "battery_energy_imported", "battery_energy_exported",
+        ):
+            assert f"pypowerwall/test-gw/{suffix}" not in published
+
+    @pytest.mark.asyncio
+    async def test_zero_energy_published_when_reported(self, monkeypatch):
+        """A gateway whose firmware lacks the endpoint reports 0 — mirrored verbatim."""
+        pub = TestMqttPublisherEnabled()._make_publisher(monkeypatch)
+        mock_client = AsyncMock()
+        pub._client = mock_client
+        pub._connected = True
+
+        status = make_status()
+        status.data.aggregates["site"]["energy_imported"] = 0
+        await pub.publish_gateway("test-gw", status)
+
+        published = {c.args[0]: c.args[1] for c in mock_client.publish.call_args_list}
+        assert published["pypowerwall/test-gw/grid_energy_imported"] == "0"
+
+
+class TestExtractEnergy:
+    def test_normal_value(self):
+        agg = {"site": {"energy_imported": 4902666.25}}
+        assert _extract_energy(agg, "site", "energy_imported") == pytest.approx(4902666.25)
+
+    def test_zero_is_valid(self):
+        agg = {"site": {"energy_imported": 0}}
+        assert _extract_energy(agg, "site", "energy_imported") == 0.0
+
+    def test_missing_section(self):
+        assert _extract_energy({}, "site", "energy_imported") is None
+
+    def test_missing_field(self):
+        assert _extract_energy({"site": {}}, "site", "energy_imported") is None
+
+    def test_non_numeric_value(self):
+        agg = {"solar": {"energy_exported": "bad"}}
+        assert _extract_energy(agg, "solar", "energy_exported") is None
+
+    def test_none_aggregates(self):
+        assert _extract_energy(None, "site", "energy_imported") is None

@@ -2,6 +2,14 @@
 
 ## Version History
 
+### [0.4.3] - 2026-08-16
+
+**Added:**
+- **Lifetime energy MQTT topics + Home Assistant sensors** — six lifetime energy accumulators (Wh) from `/api/meters/aggregates` are now published as scalar MQTT topics and exposed as HA auto-discovery sensors (`device_class: energy`, `state_class: total_increasing`): `grid_energy_imported`, `grid_energy_exported`, `home_energy_imported`, `solar_energy_exported`, `battery_energy_imported`, `battery_energy_exported`. Topic names follow the existing scalar convention (aggregates `site` → `grid`, `load` → `home`). With `state_class: total_increasing` the HA Energy dashboard charts them directly — daily stats are derived by delta, the same semantics as PW2's lifetime counters. Gateways whose firmware lacks the endpoint keep reporting `0`, mirroring the HTTP API.
+
+**Changed:**
+- **Bumped `pypowerwall` dependency to `0.16.5`** (from `0.16.2`). On PW3/TEDAPI this release overlays the lifetime `energy_imported` / `energy_exported` accumulators onto `/api/meters/aggregates` using the gateway's native local API (customer login), with thread-safety hardening (bounded lock acquisition, double-checked cache, host affinity) — see pypowerwall PR #372. This is what populates the new energy topics on PW3; PW2/local mode has always carried these fields.
+
 ### [0.4.2] - 2026-07-19
 
 **Changed:**
