@@ -64,13 +64,22 @@ Environment Variables (Proxy Compatible):
     UI and Advanced:
         PW_STYLE             - UI style: clear/black/white/grafana/grafana-dark (default: "clear")
         PW_AUTH_MODE         - Auth mode: cookie/token (default: "cookie")
-        PW_CACHE_FILE        - Cache file path (default: auto - uses PW_AUTH_PATH/.powerwall or /tmp/.powerwall)
-        PW_SITEID            - Tesla site ID for multi-site accounts (default: none)
+        PW_CACHE_FILE        - Cache file path (default: auto - uses PW_AUTH_PATH/.powerwall or /tmp/.powerwall)\n        PW_SITEID            - Tesla site ID for multi-site accounts (default: none)
         PW_CONTROL_SECRET    - Enable control commands (default: none/disabled)
         PW_NEG_SOLAR         - Allow negative solar values "yes"/"no" (default: "no")
         PW_RSA_KEY_PATH      - Path to RSA-4096 private key PEM for TEDAPI v1r LAN access (default: none)
         PW_WIFI_HOST         - WiFi host IP for TEDAPI v1r WiFi fallback (default: none)
         PROXY_BASE_URL       - Base URL for reverse proxy (default: "/")
+    
+    Time-Series Storage (Daily Energy Stats):
+        PW_TIMESERIES_RETENTION       - Raw 5s sample retention, e.g. "24h" (default), "7d",
+                                        "30d", "365d"; "0" = unlimited, "-1" = disable
+                                        the subsystem entirely (headless proxy, no SQLite,
+                                        no daily stats UI/API)
+        PW_TIMESERIES_DAILY_RETENTION - Daily kWh aggregate retention (default: "0" =
+                                        unlimited; one tiny row per gateway per day)
+        PW_TIMESERIES_PATH            - SQLite database path (default: /data/timeseries.db
+                                        when /data exists, else data/timeseries.db)
 
 Connection Modes:
 
@@ -291,6 +300,17 @@ class Settings(BaseSettings):
     # CORS configuration
     cors_origins: List[str] = Field(default=["*"], alias="CORS_ORIGINS")
 
+    # Time-series storage (TimeSeriesStore — daily energy stats, see app/core/timeseries.py)
+    timeseries_retention: str = Field(
+        default="24h", alias="PW_TIMESERIES_RETENTION"
+    )  # Raw sample retention; "-1" disables the subsystem, "0" = unlimited
+    timeseries_daily_retention: str = Field(
+        default="0", alias="PW_TIMESERIES_DAILY_RETENTION"
+    )  # Daily aggregate retention; "0" = unlimited (default)
+    timeseries_path: Optional[str] = Field(
+        default=None, alias="PW_TIMESERIES_PATH"
+    )  # SQLite file path; resolved in __init__ (/data aware)
+
     # MQTT settings
     # Set MQTT_HOST to enable MQTT publishing. All other MQTT_ variables are optional.
     mqtt_host: Optional[str] = Field(default=None, alias="MQTT_HOST")
@@ -334,6 +354,15 @@ class Settings(BaseSettings):
             else:
                 # Fall back to /tmp if no auth path
                 self.cache_file = "/tmp/.powerwall"
+        # Set default time-series database path: prefer a /data volume mount
+        # (the Docker image creates /data) so daily energy history survives
+        # container restarts; otherwise keep it local to the working dir.
+        if self.timeseries_path is None:
+            self.timeseries_path = (
+                "/data/timeseries.db"
+                if os.path.isdir("/data")
+                else "data/timeseries.db"
+            )
         self._initialize_gateways()
 
     def _load_config_file(self) -> bool:

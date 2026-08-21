@@ -3,8 +3,10 @@ import pytest
 from unittest.mock import Mock
 from fastapi.testclient import TestClient
 from app.main import app
+from app.config import settings
 from app.core.gateway_manager import gateway_manager
 from app.core.scaling import raw_to_tesla_battery_percent
+from app.core.timeseries import reset_timeseries_store
 
 
 def _reset_singleton_state():
@@ -42,6 +44,22 @@ def reset_gateway_manager():
     _reset_singleton_state()
     yield
     _reset_singleton_state()
+
+
+@pytest.fixture(autouse=True)
+def isolate_timeseries_store(tmp_path, monkeypatch):
+    """Redirect the TimeSeriesStore to a per-test temp directory.
+
+    Tests that exercise the poll loop record real samples; without this
+    they would create data/timeseries.db in the repo checkout. Dedicated
+    time-series tests construct TimeSeriesStore directly.
+    """
+    monkeypatch.setattr(
+        settings, "timeseries_path", str(tmp_path / "timeseries.db")
+    )
+    reset_timeseries_store()
+    yield
+    reset_timeseries_store()
 
 
 @pytest.fixture

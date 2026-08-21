@@ -671,6 +671,54 @@
         .mqtt-card {
             grid-column: span 12;
         }
+
+        /* Daily Energy Card */
+        .daily-energy-card {
+            grid-column: span 12;
+        }
+        .daily-energy-hint {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+        .daily-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .daily-grid .health-item {
+            padding: 8px 12px;
+            border-left: 3px solid var(--text-muted);
+        }
+        .daily-grid .health-item.pos {
+            border-left-color: var(--accent-green);
+        }
+        .daily-grid .health-item.neg {
+            border-left-color: var(--accent-yellow, #d29922);
+        }
+        .daily-grid .health-value {
+            font-size: 0.95em;
+        }
+        .daily-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85em;
+        }
+        .daily-table th, .daily-table td {
+            text-align: right;
+            padding: 4px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .daily-table th:first-child, .daily-table td:first-child {
+            text-align: left;
+        }
+        .daily-table th {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .daily-table tr.today td {
+            color: var(--accent-green);
+        }
         .mqtt-status-badge {
             font-size: 0.8em;
             font-weight: 600;
@@ -1251,6 +1299,25 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Daily Energy (hidden until time-series storage is enabled) -->
+            <div class="card daily-energy-card" id="daily-energy-card" style="display:none">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 2v7" fill="none"/>
+                                <path d="M9 9h6l-3 5h3l-6 8 2-6H8z" fill="none"/>
+                            </svg>
+                        </span>
+                        Daily Energy
+                    </div>
+                    <div class="daily-energy-hint">kWh per day — local time-series storage</div>
+                </div>
+                <div id="daily-energy-content" class="daily-energy-content">
+                    <div class="no-strings">Loading daily energy...</div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -1620,6 +1687,77 @@
                 document.getElementById('mqtt-tls').textContent = mqtt.tls ? 'Enabled' : 'Disabled';
             } catch (e) {
                 // MQTT endpoint unavailable — silently skip
+            }
+        }
+
+        // Fetch daily energy totals from the time-series store
+        async function loadDailyEnergy() {
+            const card = document.getElementById('daily-energy-card');
+            const container = document.getElementById('daily-energy-content');
+            try {
+                const todayResp = await fetch('/api/timeseries/today');
+                if (!todayResp.ok) return;
+                const today = await todayResp.json();
+                if (!today.enabled) { card.style.display = 'none'; return; }
+
+                const gwIds = Object.keys(today.gateways || {});
+                if (!gwIds.length) {
+                    card.style.display = '';
+                    container.innerHTML = '<div class="no-strings">No energy samples recorded yet — totals appear after the first polls.</div>';
+                    return;
+                }
+
+                // Recent history (includes today)
+                let days = {};
+                try {
+                    const histResp = await fetch('/api/timeseries/daily?days=8');
+                    if (histResp.ok) {
+                        const hist = await histResp.json();
+                        for (const d of (hist.days || [])) days[d.day] = d.gateways;
+                    }
+                } catch (e) { /* history optional */ }
+
+                const fmt = (v, dp=1) => (v == null ? '--' : v.toFixed(dp));
+                let html = '';
+                const isMulti = Object.keys(gatewayMeta).length > 1;
+
+                for (const gwId of gwIds) {
+                    if (isMulti) html += `<div class="gateway-section-header">${gatewayMeta[gwId]?.name || gwId}</div>`;
+                    const t = today.gateways[gwId] || {};
+                    html += `<div class="daily-grid">
+                        <div class="health-item pos"><div class="health-label">Solar Today</div><div class="health-value">${fmt(t.solar_kwh, 2)} kWh</div></div>
+                        <div class="health-item"><div class="health-label">Home Today</div><div class="health-value">${fmt(t.home_kwh, 2)} kWh</div></div>
+                        <div class="health-item pos"><div class="health-label">Batt Charged</div><div class="health-value">${fmt(t.battery_charge_kwh, 2)} kWh</div></div>
+                        <div class="health-item neg"><div class="health-label">Batt Discharged</div><div class="health-value">${fmt(t.battery_discharge_kwh, 2)} kWh</div></div>
+                        <div class="health-item"><div class="health-label">Grid Import</div><div class="health-value">${fmt(t.grid_import_kwh, 2)} kWh</div></div>
+                        <div class="health-item pos"><div class="health-label">Grid Export</div><div class="health-value">${fmt(t.grid_export_kwh, 2)} kWh</div></div>
+                    </div>`;
+
+                    // History table for this gateway (most recent first)
+                    const rows = Object.entries(days)
+                        .filter(([, gws]) => gws && gws[gwId])
+                        .sort((a, b) => b[0].localeCompare(a[0]))
+                        .slice(0, 7);
+                    if (rows.length) {
+                        const todayKey = t.day;
+                        html += `<table class="daily-table"><thead><tr>
+                            <th>Day</th><th>Solar</th><th>Home</th><th>Batt Chg</th><th>Batt Dchg</th><th>Grid Imp</th><th>Grid Exp</th>
+                        </tr></thead><tbody>`;
+                        for (const [day, gws] of rows) {
+                            const r = gws[gwId];
+                            html += `<tr${day === todayKey ? ' class="today"' : ''}><td>${day}</td>
+                                <td>${fmt(r.solar_kwh)}</td><td>${fmt(r.home_kwh)}</td>
+                                <td>${fmt(r.battery_charge_kwh)}</td><td>${fmt(r.battery_discharge_kwh)}</td>
+                                <td>${fmt(r.grid_import_kwh)}</td><td>${fmt(r.grid_export_kwh)}</td></tr>`;
+                        }
+                        html += '</tbody></table>';
+                    }
+                }
+                card.style.display = '';
+                container.innerHTML = html || '<div class="no-strings">No energy data yet</div>';
+            } catch (e) {
+                // Time-series endpoints unavailable — keep the card hidden
+                console.log('Daily energy not available:', e.message);
             }
         }
 
@@ -2157,6 +2295,7 @@
             loadPowerwalls();
             loadGateways();
             loadMqtt();
+            loadDailyEnergy();
 
             // Refresh secondary data periodically
             setInterval(() => {
@@ -2166,6 +2305,7 @@
                 loadPowerwalls();
                 loadGateways();
                 loadMqtt();
+                loadDailyEnergy();
             }, 30000);
         })();
 

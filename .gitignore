@@ -220,3 +220,7 @@ tedapi_rsa_private.pem
 
 # Local gateway config (may contain credentials)
 gateways.yaml
+
+# Time-series runtime artifacts (local runs from source)
+tmp/
+data/
