@@ -23,7 +23,7 @@ Configuration Methods:
             "timezone": "America/Denver"
           }
         ]'
-    
+
     2. Single Gateway Configuration (legacy compatibility):
         export PW_HOST=192.168.91.1
         export PW_GW_PWD=gateway_wifi_password
@@ -38,19 +38,19 @@ Environment Variables (Proxy Compatible):
         PW_EMAIL             - Tesla account email for cloud mode (default: none)
         PW_TIMEZONE          - Local timezone (default: "America/Los_Angeles")
         PW_AUTH_PATH         - Path to auth token files (default: none)
-    
+
     Server Settings:
         PW_BIND_ADDRESS      - Server bind address (default: "0.0.0.0")
         PW_PORT              - Server port (default: 8675)
         PW_DEBUG             - Enable debug logging "yes"/"no" (default: "no")
         PW_HTTPS             - Enable HTTPS mode (default: "no")
-    
+
     Performance Settings:
         PW_CACHE_EXPIRE      - Polling frequency in seconds (default: 5)
         PW_BROWSER_CACHE     - Browser cache time in seconds (default: 0)
         PW_TIMEOUT           - Pypowerwall timeout in seconds (default: 10)
         PW_POOL_MAXSIZE      - Connection pool size (default: 15)
-    
+
     Network Robustness:
         PW_SUPPRESS_NETWORK_ERRORS  - Suppress error logs (default: "no")
         PW_NETWORK_ERROR_RATE_LIMIT - Errors per minute limit (default: 5)
@@ -60,17 +60,18 @@ Environment Variables (Proxy Compatible):
         PW_CACHE_TTL                - Max cached data age in seconds (default: 30)
         PW_TEDAPI_RECOVERY          - Auto-recover TEDAPI SolarOnly fallback (default: "yes")
         PW_TEDAPI_PROBE_INTERVAL    - Seconds between TEDAPI health probes (default: 30)
-    
+
     UI and Advanced:
         PW_STYLE             - UI style: clear/black/white/grafana/grafana-dark (default: "clear")
         PW_AUTH_MODE         - Auth mode: cookie/token (default: "cookie")
-        PW_CACHE_FILE        - Cache file path (default: auto - uses PW_AUTH_PATH/.powerwall or /tmp/.powerwall)\n        PW_SITEID            - Tesla site ID for multi-site accounts (default: none)
+        PW_CACHE_FILE        - Cache file path (default: auto - uses PW_AUTH_PATH/.powerwall or /tmp/.powerwall)
+        PW_SITEID            - Tesla site ID for multi-site accounts (default: none)
         PW_CONTROL_SECRET    - Enable control commands (default: none/disabled)
         PW_NEG_SOLAR         - Allow negative solar values "yes"/"no" (default: "no")
         PW_RSA_KEY_PATH      - Path to RSA-4096 private key PEM for TEDAPI v1r LAN access (default: none)
         PW_WIFI_HOST         - WiFi host IP for TEDAPI v1r WiFi fallback (default: none)
         PROXY_BASE_URL       - Base URL for reverse proxy (default: "/")
-    
+
     Time-Series Storage (Daily Energy Stats):
         PW_TIMESERIES_RETENTION       - Raw 5s sample retention, e.g. "24h" (default), "7d",
                                         "30d", "365d"; "0" = unlimited, "-1" = disable
@@ -89,13 +90,13 @@ Connection Modes:
         • Configuration: PW_HOST + PW_GW_PWD  (password-based)
         •            OR: PW_HOST + PW_GW_PWD + PW_RSA_KEY_PATH  (RSA key + v1r mode)
         • Example: 192.168.91.1 with gateway password (optionally with RSA PEM key for v1r mode)
-    
+
     Cloud Mode:
         • Remote access from anywhere
         • Requires Tesla account authentication
         • Configuration: PW_EMAIL + PW_AUTH_PATH
         • Setup: Run `python3 -m pypowerwall setup` first
-    
+
     FleetAPI Mode:
         • Official Tesla API
         • Requires app registration with Tesla
@@ -106,7 +107,7 @@ Gateway Configuration Priority:
     1. PW_GATEWAYS JSON (highest priority)
        - Supports multiple gateways with independent settings
        - Each gateway can have different connection modes
-       
+
     2. Legacy environment variables (fallback)
        - Single gateway using PW_HOST, PW_GW_PWD, etc.
        - Automatically creates "default" gateway
@@ -119,12 +120,12 @@ Examples:
     PW_GW_PWD=MyGatewayPassword
     PW_CACHE_EXPIRE=10
     PW_DEBUG=yes
-    
+
     # Single gateway (Cloud mode)
     PW_EMAIL=user@example.com
     PW_AUTH_PATH=/home/user/.pypowerwall
     PW_CACHE_EXPIRE=30
-    
+
     # Multiple gateways (mixed modes)
     PW_GATEWAYS='[
       {"id": "home", "host": "192.168.91.1", "gw_pwd": "pass1"},
@@ -139,12 +140,12 @@ Architecture:
         • Type validation and conversion
         • Default values for all settings
         • Computed properties (e.g., control_enabled)
-    
+
     GatewayConfig Class:
         • Defines single gateway configuration
         • Supports TEDAPI, Cloud, and FleetAPI modes
         • Used in both PW_GATEWAYS and legacy modes
-    
+
     Initialization Flow:
         1. Settings() loads all environment variables
         2. _initialize_gateways() called automatically
@@ -156,27 +157,28 @@ Adding New Settings:
 
     1. Add field to Settings class with Field() and alias:
         new_setting: int = Field(default=42, alias="PW_NEW_SETTING")
-    
+
     2. Document in this module docstring
-    
+
     3. Use in code via settings.new_setting
-    
+
     4. Update README with new variable
 
 Accessing Configuration:
 
     from app.config import settings
-    
+
     # Access settings
     port = settings.server_port
     gateways = settings.gateways
     debug_enabled = settings.debug
-    
+
     # Check features
     if settings.control_enabled:
         # Control commands available
         pass
 """
+
 import json
 import logging
 import os
@@ -207,14 +209,18 @@ class GatewayConfig(BaseModel):
     id: str
     name: Optional[str] = None  # Defaults to id when omitted
     host: Optional[str] = None
-    port: Optional[int] = Field(default=None, ge=1, le=65535)  # Non-standard HTTPS port (e.g. 8443 via travel router)
+    port: Optional[int] = Field(
+        default=None, ge=1, le=65535
+    )  # Non-standard HTTPS port (e.g. 8443 via travel router)
     gw_pwd: Optional[str] = None  # Gateway Wi-Fi password for TEDAPI mode
-    rsa_key_path: Optional[str] = None  # Path to RSA-4096 private key PEM for v1r LAN TEDAPI access
+    rsa_key_path: Optional[str] = (
+        None  # Path to RSA-4096 private key PEM for v1r LAN TEDAPI access
+    )
     wifi_host: Optional[str] = None  # WiFi host IP for TEDAPI v1r WiFi fallback
     email: Optional[str] = None
-    authpath: Optional[
-        str
-    ] = None  # Path to .pypowerwall.auth and .pypowerwall.site files
+    authpath: Optional[str] = (
+        None  # Path to .pypowerwall.auth and .pypowerwall.site files
+    )
     timezone: str = "America/Los_Angeles"
     cloud_mode: bool = False
     fleetapi: bool = False
@@ -469,8 +475,7 @@ class Settings(BaseSettings):
                 gateways_data = json.loads(gateways_json)
             except Exception as e:
                 logger.error(
-                    f"PW_GATEWAYS is not valid JSON ({e}) - "
-                    "no gateways configured"
+                    f"PW_GATEWAYS is not valid JSON ({e}) - " "no gateways configured"
                 )
                 return
             if not isinstance(gateways_data, list):

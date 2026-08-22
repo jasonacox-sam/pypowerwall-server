@@ -54,6 +54,7 @@ Environment Variables:
                                   otherwise "data/timeseries.db" relative to
                                   the working directory).
 """
+
 import asyncio
 import logging
 import os
@@ -242,15 +243,12 @@ class TimeSeriesStore:
             directory = os.path.dirname(self._db_path)
             if directory:
                 os.makedirs(directory, exist_ok=True)
-            conn = sqlite3.connect(
-                self._db_path, check_same_thread=False, timeout=10.0
-            )
+            conn = sqlite3.connect(self._db_path, check_same_thread=False, timeout=10.0)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA busy_timeout=5000")
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS samples (
                     gateway_id TEXT NOT NULL,
                     ts REAL NOT NULL,
@@ -287,8 +285,7 @@ class TimeSeriesStore:
                     grid_import_w REAL NOT NULL DEFAULT 0,
                     grid_export_w REAL NOT NULL DEFAULT 0
                 );
-                """
-            )
+                """)
             conn.commit()
             self._conn = conn
             logger.debug("TimeSeriesStore opened %s (WAL mode)", self._db_path)
@@ -366,9 +363,7 @@ class TimeSeriesStore:
                 # as raw rows but never move integration state backwards.
                 daily_deltas: Dict[str, Dict[str, float]] = {}
                 if state is not None and ts > state["ts"]:
-                    daily_deltas = self._integrate_interval(
-                        state, ts, values, timezone
-                    )
+                    daily_deltas = self._integrate_interval(state, ts, values, timezone)
 
                 conn.execute(
                     "INSERT OR REPLACE INTO samples "
@@ -475,7 +470,9 @@ class TimeSeriesStore:
 
     @staticmethod
     def _integrate_interval(
-        state: Dict[str, Any], ts: float, values: Dict[str, float],
+        state: Dict[str, Any],
+        ts: float,
+        values: Dict[str, float],
         timezone: Optional[str],
     ) -> Dict[str, Dict[str, float]]:
         """Trapezoidal integration of one interval, split at local midnights.
@@ -505,9 +502,7 @@ class TimeSeriesStore:
                 v1 = values[category]
                 watts0 = v0 + (v1 - v0) * f0
                 watts1 = v0 + (v1 - v0) * f1
-                day_deltas[category] += (
-                    (watts0 + watts1) / 2.0 * (b - a) / 3_600_000.0
-                )
+                day_deltas[category] += (watts0 + watts1) / 2.0 * (b - a) / 3_600_000.0
         return result
 
     def _get_day_row(
@@ -549,9 +544,13 @@ class TimeSeriesStore:
             except sqlite3.Error as e:
                 logger.debug("TimeSeriesStore query failed: %s", e)
                 return {"enabled": True, "days": [], "last_updated": None}
-            cutoff = (
-                datetime.now(_UTC) - timedelta(days=max(days - 1, 0))
-            ).strftime("%Y-%m-%d")
+            # Days are stored as gateway-local dates, which can trail or lead
+            # the UTC date around midnight. Widen the SQL cutoff by one day so
+            # late-local-day rows are never dropped, then trim to `days` after
+            # grouping (ISO day strings sort correctly across gateways).
+            cutoff = (datetime.now(_UTC) - timedelta(days=max(days, 1))).strftime(
+                "%Y-%m-%d"
+            )
             if gateway:
                 rows = conn.execute(
                     "SELECT * FROM daily_energy WHERE day>=? AND gateway_id=? "
@@ -576,7 +575,7 @@ class TimeSeriesStore:
                     {"day": day, "gateways": gateways}
                     for day, gateways in sorted(
                         by_day.items(), key=lambda item: item[0], reverse=True
-                    )
+                    )[:days]
                 ],
                 "last_updated": last_updated,
             }
@@ -687,9 +686,7 @@ class TimeSeriesStore:
                     db_size += wal.stat().st_size
                 try:
                     conn = self._ensure_conn()
-                    samples = conn.execute(
-                        "SELECT COUNT(*) FROM samples"
-                    ).fetchone()[0]
+                    samples = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
                     daily_rows = conn.execute(
                         "SELECT COUNT(*) FROM daily_energy"
                     ).fetchone()[0]
@@ -747,9 +744,7 @@ class TimeSeriesStore:
         if not self.enabled:
             return
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            self._ensure_executor(), self._maintenance_sync
-        )
+        await loop.run_in_executor(self._ensure_executor(), self._maintenance_sync)
 
     def _maintenance_sync(self) -> None:
         with self._lock:
@@ -787,7 +782,7 @@ class TimeSeriesStore:
             except asyncio.CancelledError:
                 pass
             self._maintenance_task = None
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         if loop.is_running():
             await loop.run_in_executor(None, self._close_sync)
         else:  # pragma: no cover - defensive

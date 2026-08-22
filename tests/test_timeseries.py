@@ -12,6 +12,7 @@ Covers:
     - Disabled subsystem (PW_TIMESERIES_RETENTION=-1)
     - /api/timeseries/* endpoints (enabled and disabled)
 """
+
 import asyncio
 import math
 import time
@@ -25,7 +26,6 @@ from app.core.timeseries import (
     TimeSeriesStore,
     parse_duration,
 )
-
 
 # ---------------------------------------------------------------------------
 # parse_duration
@@ -71,11 +71,18 @@ class TestParseDuration:
 # ---------------------------------------------------------------------------
 
 
-async def record(store, ts, solar=0.0, home=0.0, battery=0.0, site=0.0,
-                 soe=None, tz="UTC", gw="gw1"):
+async def record(
+    store, ts, solar=0.0, home=0.0, battery=0.0, site=0.0, soe=None, tz="UTC", gw="gw1"
+):
     return await store.record_sample(
-        gateway_id=gw, ts=ts, solar_w=solar, home_w=home,
-        battery_w=battery, site_w=site, soe=soe, timezone=tz,
+        gateway_id=gw,
+        ts=ts,
+        solar_w=solar,
+        home_w=home,
+        battery_w=battery,
+        site_w=site,
+        soe=soe,
+        timezone=tz,
     )
 
 
@@ -89,8 +96,9 @@ class TestIntegration:
         """
         store = TimeSeriesStore(db_path=str(tmp_path / "ts.db"))
         await record(store, 1000.0)
-        row = await record(store, 1000.0 + 3600, solar=3600, home=3600,
-                           battery=-3600, site=3600)
+        row = await record(
+            store, 1000.0 + 3600, solar=3600, home=3600, battery=-3600, site=3600
+        )
         assert row["solar_kwh"] == pytest.approx(1.8)
         assert row["home_kwh"] == pytest.approx(1.8)
         assert row["battery_charge_kwh"] == pytest.approx(1.8)
@@ -105,8 +113,9 @@ class TestIntegration:
         """Both endpoints at the same power: 3600 W * 1 h = 1 kWh exactly."""
         store = TimeSeriesStore(db_path=str(tmp_path / "ts.db"))
         await record(store, 2000.0, solar=3600, home=2000, battery=-1000, site=-1000)
-        row = await record(store, 2000.0 + 3600, solar=3600, home=2000,
-                           battery=-1000, site=-1000)
+        row = await record(
+            store, 2000.0 + 3600, solar=3600, home=2000, battery=-1000, site=-1000
+        )
         assert row["solar_kwh"] == pytest.approx(3.6)
         assert row["home_kwh"] == pytest.approx(2.0)
         assert row["battery_charge_kwh"] == pytest.approx(1.0)
@@ -167,9 +176,11 @@ class TestIntegration:
         # UTC timezone; midnight falls on integer 86400 boundaries.
         # Three samples at 23:00, 00:00, 01:00 — each interval is exactly
         # 3600s (the gap threshold, still integrated) at steady 1200 W.
-        midnight = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).timestamp()
+        midnight = (
+            datetime.now(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp()
+        )
         t0 = midnight - 3600
         tmid = midnight
         t1 = midnight + 3600
@@ -203,9 +214,11 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_unknown_timezone_falls_back_to_utc(self, tmp_path):
         store = TimeSeriesStore(db_path=str(tmp_path / "ts.db"))
-        midnight = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ).timestamp()
+        midnight = (
+            datetime.now(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp()
+        )
         t0 = midnight - 3600
         await record(store, t0, solar=1200, tz="Not/ARealZone")
         await record(store, midnight, solar=1200, tz="Not/ARealZone")
@@ -286,9 +299,10 @@ class TestPersistenceAndMaintenance:
         assert oldest >= now - max(7200, RAW_KEEP_FLOOR) - 60
         # ...and daily aggregates were preserved despite pruning
         daily = await store.get_daily_energy(days=7)
-        assert sum(
-            g["solar_kwh"] for d in daily["days"] for g in d["gateways"].values()
-        ) > 0
+        assert (
+            sum(g["solar_kwh"] for d in daily["days"] for g in d["gateways"].values())
+            > 0
+        )
         await store.stop()
 
     @pytest.mark.asyncio
@@ -401,20 +415,18 @@ class TestAPI:
 
 class TestPollLoopWiring:
     @pytest.mark.asyncio
-    async def test_poll_records_sample(self, tmp_path, monkeypatch,
-                                       mock_gateway_manager, mock_pypowerwall):
+    async def test_poll_records_sample(
+        self, tmp_path, monkeypatch, mock_gateway_manager, mock_pypowerwall
+    ):
         """A successful poll cycle must land in the time-series store."""
         import app.core.timeseries as ts_mod
         from app.config import settings
         from app.models.gateway import Gateway, GatewayStatus
 
-        monkeypatch.setattr(
-            settings, "timeseries_path", str(tmp_path / "wired.db")
-        )
+        monkeypatch.setattr(settings, "timeseries_path", str(tmp_path / "wired.db"))
         ts_mod.reset_timeseries_store()
 
-        gw = Gateway(id="gw1", name="G1", host="1.2.3.4", gw_pwd="x",
-                     timezone="UTC")
+        gw = Gateway(id="gw1", name="G1", host="1.2.3.4", gw_pwd="x", timezone="UTC")
         mock_gateway_manager.gateways["gw1"] = gw
         mock_gateway_manager.connections["gw1"] = mock_pypowerwall
         mock_gateway_manager.cache["gw1"] = GatewayStatus(gateway=gw, online=False)
