@@ -205,7 +205,13 @@ integration: solar, home consumption, battery charge/discharge, grid
 import/export — each tracked directionally (never netted). Totals reset at
 local midnight using each gateway's configured timezone, survive restarts,
 and show in the web console's **Daily Energy** panel plus the
-`/api/timeseries/*` endpoints. Raw samples are pruned to the retention
+`/api/timeseries/*` endpoints. Raw samples also capture battery level
+(state of charge) per poll — kept for the raw retention window only, never
+downsampled into daily aggregates. Clicking the console's **Energy Summary**
+panel toggles it into an **Energy Trend** view: the last 24 hours of raw
+data charted as Solar/Home/Battery/Grid kW (shared left axis) plus Battery
+Level % (dashed, right axis), using the standard color coding. Raw samples
+are pruned to the retention
 window (keeping the last hour for troubleshooting); daily aggregates are one
 tiny row per gateway per day (~100 B/day) so unlimited retention is the
 sensible default. Intervals longer than 1 hour (outage/gap) are never
@@ -465,7 +471,8 @@ All existing proxy endpoints work unchanged:
 **Time-Series Endpoints (Daily Energy):**
 - `GET /api/timeseries/today` - Today's running kWh totals per gateway
 - `GET /api/timeseries/daily?days=7` - Daily kWh totals (per gateway/category)
-- `GET /api/timeseries/samples` - Raw samples (troubleshooting; filters: `gateway`, `start`, `end`, `limit`)
+- `GET /api/timeseries/trend?hours=24` - Bucketed kW + battery level for charting (per-gateway mean, summed across gateways)
+- `GET /api/timeseries/samples` - Raw samples (troubleshooting; filters: `gateway`, `start`, `end`, `limit`) — includes battery level (`soe`)
 - `GET /api/timeseries/status` - Subsystem status, retention settings, DB size
 
 All report `{"enabled": false, ...}` when disabled (`PW_TIMESERIES_RETENTION=-1`).

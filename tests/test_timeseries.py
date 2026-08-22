@@ -248,11 +248,18 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_multi_gateway_isolation(self, tmp_path):
         store = TimeSeriesStore(db_path=str(tmp_path / "ts.db"))
-        now = time.time()
-        await record(store, now, solar=1000, gw="a")
-        await record(store, now + 3600, solar=1000, gw="a")
-        await record(store, now, solar=2000, gw="b")
-        await record(store, now + 3600, solar=2000, gw="b")
+        # Anchor mid-day UTC three days back so the 1-hour interval can
+        # never straddle a UTC midnight (which would split the day row and
+        # make the assertion time-of-day dependent). Stays inside days=7.
+        base = (
+            (datetime.now(timezone.utc) - timedelta(days=3))
+            .replace(hour=12, minute=0, second=0, microsecond=0)
+            .timestamp()
+        )
+        await record(store, base, solar=1000, gw="a")
+        await record(store, base + 3600, solar=1000, gw="a")
+        await record(store, base, solar=2000, gw="b")
+        await record(store, base + 3600, solar=2000, gw="b")
         daily = await store.get_daily_energy(days=7)
         day = daily["days"][0]["gateways"]
         assert day["a"]["solar_kwh"] == pytest.approx(1.0)
@@ -358,6 +365,77 @@ class TestDisabled:
 
 
 # ---------------------------------------------------------------------------
+# Trend query (bucketed kW + battery level for the console chart)
+# ---------------------------------------------------------------------------
+
+
+class TestTrend:
+    @pytest.mark.asyncio
+    async def test_trend_buckets_and_battery_level(self, tmp_path):
+        """24h trend buckets average raw samples, sum across gateways, and
+        carry battery level (%) from raw samples only."""
+        store = TimeSeriesStore(db_path=str(tmp_path / "ts.db"))
+        # 24h window -> 240s buckets; align to a bucket edge so all three
+        # samples land in one bucket deterministically.
+        base = math.floor(time.time() / 240) * 240
+        for ts, soe in ((base, 50.0), (base + 100, 60.0), (base + 200, 70.0)):
+            await record(
+                store,
+                ts,
+                solar=1000,
+                home=2000,
+                battery=-1000,
+                site=500,
+                soe=soe,
+                gw="a",
+            )
+            await record(
+                store,
+                ts,
+                solar=2000,
+                home=0,
+                battery=0,
+                site=0,
+                soe=soe + 10,
+                gw="b",
+            )
+        trend = await store.get_trend(hours=24)
+        assert trend["enabled"] is True
+        assert trend["hours"] == 24
+        assert trend["bucket_seconds"] == 240
+        assert trend["count"] == 1  # single bucket
+        p = trend["points"][0]
+        assert p["ts"] == base
+        # Fleet totals: gateway a + gateway b
+        assert p["solar_kw"] == pytest.approx(3.0)
+        assert p["home_kw"] == pytest.approx(2.0)
+        assert p["battery_kw"] == pytest.approx(-1.0)  # charging = negative
+        assert p["grid_kw"] == pytest.approx(0.5)  # importing = positive
+        # Mean battery level across samples and gateways: (60 + 70) / 2
+        assert p["battery_level"] == pytest.approx(65.0)
+
+        # Gateway filter returns just that gateway's values
+        solo = await store.get_trend(hours=24, gateway="a")
+        assert solo["points"][0]["solar_kw"] == pytest.approx(1.0)
+        assert solo["points"][0]["battery_level"] == pytest.approx(60.0)
+
+        # Battery level lives in raw samples only — never in daily aggregates
+        samples = await store.get_samples()
+        assert samples["count"] == 6
+        assert all(s["soe"] is not None for s in samples["samples"])
+        daily = await store.get_daily_energy(days=1)
+        row = daily["days"][0]["gateways"]["a"]
+        assert "soe" not in row
+        await store.stop()
+
+    @pytest.mark.asyncio
+    async def test_trend_disabled(self, tmp_path):
+        store = TimeSeriesStore(db_path=str(tmp_path / "ts.db"), retention=-1)
+        trend = await store.get_trend()
+        assert trend == {"enabled": False, "points": [], "count": 0}
+
+
+# ---------------------------------------------------------------------------
 # API endpoints (uses the app TestClient; conftest isolates the DB path)
 # ---------------------------------------------------------------------------
 
@@ -393,6 +471,17 @@ class TestAPI:
         resp = client.get("/api/timeseries/samples")
         assert resp.status_code == 200
         assert resp.json()["count"] == 0
+
+    def test_trend_endpoint(self, client):
+        resp = client.get("/api/timeseries/trend?hours=24")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["enabled"] is True
+        assert body["points"] == []
+        assert body["hours"] == 24
+        assert "bucket_seconds" in body
+        assert client.get("/api/timeseries/trend?hours=0").status_code == 422
+        assert client.get("/api/timeseries/trend?hours=999").status_code == 422
 
     def test_disabled_reports_enabled_false(self, client, monkeypatch):
         from app.core import timeseries as ts_mod

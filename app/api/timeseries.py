@@ -8,6 +8,7 @@ All routes are prefixed with /api/timeseries (configured in main.py).
 Routes:
     - GET /api/timeseries/daily   -> Daily kWh totals per gateway/category
     - GET /api/timeseries/today   -> Today's running totals for all gateways
+    - GET /api/timeseries/trend   -> Bucketed kW + battery level (charting)
     - GET /api/timeseries/samples -> Raw samples (troubleshooting)
     - GET /api/timeseries/status  -> Subsystem status and DB sizing
 
@@ -15,6 +16,10 @@ Query Parameters:
     daily:   days (int, default 7)  — number of days back from today
              gateway (str, optional) — restrict to a single gateway ID
     today:   none — returns every configured gateway's running totals
+    trend:   hours (int, default 24, max 168) — window length; gateway
+             (str, optional) restricts to one gateway. Returns ~360
+             bucket-averaged points: solar/home/battery/grid kW plus mean
+             battery level (%) per bucket.
     samples: gateway (str, optional), start (unix ts), end (unix ts),
              limit (int, default 500, max 10000)
 
@@ -28,6 +33,7 @@ Design Notes:
     - Endpoints return immediately; missing data yields empty lists, not
       errors, matching the degraded-gracefully style of the other APIs.
 """
+
 import time
 from typing import Optional
 
@@ -75,6 +81,22 @@ async def get_today():
         "gateways": out,
         "server_time": time.time(),
     }
+
+
+@router.get("/trend")
+async def get_trend(
+    hours: int = Query(default=24, ge=1, le=168),
+    gateway: Optional[str] = Query(default=None),
+):
+    """Bucketed time series of power (kW) and battery level (%) for charts.
+
+    Averages raw samples into ~4-minute buckets over the requested window
+    so a 24h view is ~360 points rather than ~17k rows. Battery kW is
+    positive = discharging, grid kW positive = importing; ``battery_level``
+    is mean state of charge per bucket (raw-sample only, never persisted
+    into daily aggregates).
+    """
+    return await get_timeseries_store().get_trend(hours=hours, gateway=gateway)
 
 
 @router.get("/samples")

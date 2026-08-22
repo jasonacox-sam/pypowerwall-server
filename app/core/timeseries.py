@@ -603,6 +603,93 @@ class TimeSeriesStore:
                 return None
             return self._get_day_row(gateway_id, today, conn)
 
+    async def get_trend(
+        self, hours: int = 24, gateway: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Bucketed time series for charting (last ``hours`` of raw data).
+
+        Raw 5s samples are averaged into ~240-second buckets (per gateway,
+        then summed across gateways) so a 24-hour window returns ~360 points
+        instead of ~17k rows. Power columns keep the PowerwallData sign
+        convention (battery positive = discharging, grid positive =
+        importing) and are returned in kW; ``battery_level`` is the mean
+        state of energy (%) in each bucket. Battery level lives only in raw
+        samples — it is never downsampled into daily aggregates.
+
+        Args:
+            hours:   Window length (1-168).
+            gateway: Restrict to one gateway ID (None = all, summed).
+        """
+        if not self.enabled:
+            return {"enabled": False, "points": [], "count": 0}
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._ensure_executor(), partial(self._get_trend_sync, hours, gateway)
+        )
+
+    def _get_trend_sync(self, hours: int, gateway: Optional[str]) -> Dict[str, Any]:
+        hours = max(1, min(int(hours), 168))
+        now = time.time()
+        span = hours * 3600.0
+        # Target ~360 buckets, rounded to a whole minute, never below 60s.
+        bucket = max(60.0, round(span / 360.0 / 60.0) * 60.0)
+        start = now - span
+        with self._lock:
+            try:
+                conn = self._ensure_conn()
+            except sqlite3.Error as e:
+                logger.debug("TimeSeriesStore query failed: %s", e)
+                return {
+                    "enabled": True,
+                    "points": [],
+                    "count": 0,
+                    "bucket_seconds": bucket,
+                    "hours": hours,
+                }
+            # Inner query: mean per (bucket, gateway) so multi-gateway setups
+            # sum instead of average; outer query collapses to fleet totals
+            # (mean SoE). Single-gateway deployments get plain bucket means.
+            gw_filter = "AND gateway_id=? " if gateway else ""
+            sql = (
+                "SELECT bstart, "
+                "SUM(solar_avg)/1000.0 AS solar_kw, "
+                "SUM(home_avg)/1000.0 AS home_kw, "
+                "SUM(batt_avg)/1000.0 AS battery_kw, "
+                "SUM(grid_avg)/1000.0 AS grid_kw, "
+                "AVG(soe_avg) AS battery_level "
+                "FROM (SELECT (CAST(ts/? AS INTEGER))*? AS bstart, "
+                "gateway_id, AVG(solar_w) AS solar_avg, "
+                "AVG(home_w) AS home_avg, "
+                "AVG(battery_discharge_w - battery_charge_w) AS batt_avg, "
+                "AVG(grid_import_w - grid_export_w) AS grid_avg, "
+                "AVG(soe) AS soe_avg FROM samples WHERE ts>=? "
+                + gw_filter
+                + "GROUP BY bstart, gateway_id) "
+                "GROUP BY bstart ORDER BY bstart"
+            )
+            rows = conn.execute(
+                sql, (bucket, bucket, start, *((gateway,) if gateway else ()))
+            ).fetchall()
+            points = [
+                {
+                    "ts": row["bstart"],
+                    "solar_kw": row["solar_kw"],
+                    "home_kw": row["home_kw"],
+                    "battery_kw": row["battery_kw"],
+                    "grid_kw": row["grid_kw"],
+                    "battery_level": row["battery_level"],
+                }
+                for row in rows
+            ]
+            return {
+                "enabled": True,
+                "hours": hours,
+                "bucket_seconds": bucket,
+                "points": points,
+                "count": len(points),
+                "last_updated": now,
+            }
+
     async def get_samples(
         self,
         gateway: Optional[str] = None,
