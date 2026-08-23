@@ -435,6 +435,12 @@ class GatewayManager:
                 f"Gateway manager ready - {len(self.gateways)} gateway(s) will connect on first poll"
             )
 
+        # Start the time-series store's background maintenance loop (no-op
+        # when PW_TIMESERIES_RETENTION=-1).
+        from app.core.timeseries import get_timeseries_store
+
+        await get_timeseries_store().start()
+
     async def _init_cloud_control(self, hybrid_configs: List[GatewayConfig]):
         """Create the hybrid cloud-control connection in the background."""
         from app.config import settings
@@ -533,6 +539,12 @@ class GatewayManager:
         self._poll_tasks.clear()
         self._probe_tasks.clear()
         self._mqtt_tasks.clear()
+
+        # Stop the time-series store (maintenance task + SQLite close).
+        from app.core.timeseries import get_timeseries_store, reset_timeseries_store
+
+        await get_timeseries_store().stop()
+        reset_timeseries_store()
 
         # Shutdown thread pool executor
         if self._executor:
@@ -1066,6 +1078,10 @@ class GatewayManager:
                 gateway=gateway, data=data, online=True, last_updated=data.timestamp
             )
 
+            # Persist the sample for daily energy statistics (never raises;
+            # no-op when the store is disabled).
+            await self._record_timeseries_sample(gateway_id, gateway, data)
+
             # Publish to MQTT after the cache is updated (never raises here).
             self._schedule_mqtt_publish(gateway_id)
 
@@ -1114,6 +1130,52 @@ class GatewayManager:
 
             # Publish the offline status to MQTT so HA reflects gateway going offline.
             self._schedule_mqtt_publish(gateway_id)
+
+    async def _record_timeseries_sample(
+        self, gateway_id: str, gateway, data: PowerwallData
+    ) -> None:
+        """Feed one poll result into the TimeSeriesStore.
+
+        Runs after the cache update on every successful poll cycle. Storage
+        failures are logged and swallowed — statistics must never break
+        polling. Samples are awaited (not fire-and-forget) so each gateway's
+        samples stay strictly ordered for trapezoidal integration, but capped
+        by a timeout so a hung SQLite write (disk full, dying flash) can
+        never stall the poll loop.
+        """
+        try:
+            aggregates = data.aggregates or {}
+            solar = (aggregates.get("solar") or {}).get("instant_power")
+            load = (aggregates.get("load") or {}).get("instant_power")
+            battery = (aggregates.get("battery") or {}).get("instant_power")
+            site = (aggregates.get("site") or {}).get("instant_power")
+            if None in (solar, load, battery, site):
+                return  # Partial aggregates — skip rather than store zeros
+            ts = data.timestamp
+            if ts is None or ts < 1e9:  # Bogus/missing clock — use server time
+                ts = datetime.now().timestamp()
+            from app.core.timeseries import get_timeseries_store
+
+            await asyncio.wait_for(
+                get_timeseries_store().record_sample(
+                    gateway_id=gateway_id,
+                    ts=ts,
+                    solar_w=solar,
+                    home_w=load,
+                    battery_w=battery,
+                    site_w=site,
+                    soe=data.soe,
+                    timezone=gateway.timezone,
+                ),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Time-series sample write timed out for %s — polling continues",
+                gateway_id,
+            )
+        except Exception as e:
+            logger.debug(f"Time-series sample recording failed for {gateway_id}: {e}")
 
     def _schedule_mqtt_publish(self, gateway_id: str) -> None:
         """Schedule an MQTT publish of the current cached status for a gateway.

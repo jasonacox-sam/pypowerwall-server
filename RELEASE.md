@@ -2,6 +2,23 @@
 
 ## Version History
 
+### [0.5.0] - 2026-08-23
+
+**Added:**
+- **Persistent time-series energy stats (TimeSeriesStore)** — new SQLite-backed store that records raw power samples (solar, home, battery, grid, battery charge level) every poll cycle, and downsamples them into persistent daily energy totals (kWh imported/exported/charged/discharged) per gateway. Data survives restarts — daily totals resume from persisted values and keep accruing with no reset or double counting. Storage is bounded: raw samples are kept for a configurable retention window (battery charge level is raw-only, never downsampled), daily aggregates are kept indefinitely.
+- **Daily Energy panel** — new dashboard panel showing today's Solar, Home, Battery Charged/Discharged, and Grid Import/Export totals, using the standard Energy Summary color palette (solar yellow, home blue, battery green, grid gray) via the same CSS variables.
+- **Energy Summary ↔ Energy Trend flip panel** — click the Energy Summary card to flip it in place into an Energy Trend panel (same footprint, no layout shift — panels below never move). The trend chart plots the last 24 hours of raw data with Solar/Home/Battery/Grid kW on the shared left axis (translucent fill to zero) and Battery Level % as a dashed line on the right axis, in standard colors. Time scale options: 30m · 1hr · 3hr · 6hr · 12hr · 24hr (rolling), full local day 0:00–23:59 (default), Day, and "Fit" (all retained data). Click again ("click for summary") to flip back.
+- **Time-series API endpoints:**
+  - `GET /api/timeseries/samples` — raw sample rows (includes `soe` battery level)
+  - `GET /api/timeseries/daily` — persisted daily energy totals
+  - `GET /api/timeseries/trend` — chart-ready bucket aggregation for the trend panel (~360 points regardless of span; supports `hours`, `start`/`end`, `fit`, per-gateway sums for multi-gateway fleets)
+  - `GET /api/timeseries/status` — store health: row counts, retention, `write_failures` counter, DB filename (full path masked)
+
+**Fixed:**
+- **Timezone-correct daily buckets** — daily rows are keyed by local day, so evening local-day samples west of UTC are no longer split into the wrong day row.
+- **Poll-loop resilience** — sample writes run in a dedicated worker thread with a 5s `asyncio.wait_for` guard, so a hung SQLite write (e.g. full disk on an SBC) can never stall gateway polling. Write failures log a rate-limited warning (once per 5 min) and increment the visible `write_failures` counter.
+- **Clean shutdown** — executor shutdown uses `cancel_futures=True` so queued writes can't reopen the DB after close; a clean SIGTERM checkpoints the WAL.
+
 ### [0.4.3] - 2026-08-16
 
 **Added:**

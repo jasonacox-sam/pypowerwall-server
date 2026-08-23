@@ -235,6 +235,107 @@
         /* Energy Summary Card */
         .energy-card {
             grid-column: span 6;
+            cursor: pointer;
+        }
+        /* The summary grid always stays in flow and defines the card height;
+           the trend panel overlays it at the same footprint so flipping
+           between the two never shifts the panels below. The swap is
+           two-phase: fade out, switch panels while fully transparent, fade
+           back in — the two panels never show at the same time. */
+        .energy-body {
+            position: relative;
+            transition: opacity 150ms ease;
+        }
+        .energy-body.swapping {
+            opacity: 0;
+        }
+        /* .energy-item has transition:all, which animates the inherited
+           visibility change — tiles would linger 200ms into the fade-in.
+           Suppress child transitions while swapping so the switch is
+           instant while the body is transparent. */
+        .energy-body.swapping * {
+            transition: none !important;
+        }
+        #energy-trend {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .energy-card.trend-mode .energy-grid {
+            visibility: hidden;
+        }
+        .energy-card.trend-mode #energy-trend {
+            display: flex;
+        }
+        .energy-mode-hint {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+        .energy-trend-legend {
+            display: flex;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+            gap: 6px 16px;
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .energy-trend-legend .key {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .energy-trend-legend .swatch {
+            display: inline-block;
+            width: 16px;
+            height: 3px;
+            border-radius: 2px;
+        }
+        .energy-trend-legend .swatch.dashed {
+            background: repeating-linear-gradient(90deg, var(--battery-color) 0 5px, transparent 5px 9px);
+        }
+        #energy-trend-chart {
+            width: 100%;
+            flex: 1 1 auto;
+            min-height: 140px;
+            height: auto;
+            display: block;
+        }
+        .energy-trend-ranges {
+            display: flex;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        .energy-trend-ranges button {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid rgba(139, 148, 158, 0.4);
+            border-radius: 4px;
+            font-size: 0.75em;
+            padding: 2px 8px;
+            cursor: pointer;
+        }
+        .energy-trend-ranges button:hover {
+            border-color: var(--text-secondary);
+        }
+        .energy-trend-ranges button.active {
+            color: var(--text-primary, #e6edf3);
+            border-color: var(--text-secondary);
+            background: rgba(139, 148, 158, 0.2);
+        }
+        .energy-trend-note {
+            flex-shrink: 0;
+            font-size: 0.8em;
+            color: var(--text-muted);
+            margin-top: 6px;
+            min-height: 1em;
         }
         
         .energy-grid {
@@ -671,6 +772,54 @@
         .mqtt-card {
             grid-column: span 12;
         }
+
+        /* Daily Energy Card */
+        .daily-energy-card {
+            grid-column: span 12;
+        }
+        .daily-energy-hint {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+        .daily-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .daily-grid .health-item {
+            padding: 8px 12px;
+            border-left: 3px solid var(--text-muted);
+        }
+        /* Category borders match the Energy Summary panel's standard colors:
+           solar = yellow, home = blue, battery = green, grid = gray. */
+        .daily-grid .health-item.cat-solar { border-left-color: var(--solar-color); }
+        .daily-grid .health-item.cat-home { border-left-color: var(--home-color); }
+        .daily-grid .health-item.cat-battery { border-left-color: var(--battery-color); }
+        .daily-grid .health-item.cat-grid { border-left-color: var(--grid-color); }
+        .daily-grid .health-value {
+            font-size: 0.95em;
+        }
+        .daily-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85em;
+        }
+        .daily-table th, .daily-table td {
+            text-align: right;
+            padding: 4px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .daily-table th:first-child, .daily-table td:first-child {
+            text-align: left;
+        }
+        .daily-table th {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .daily-table tr.today td {
+            color: var(--accent-green);
+        }
         .mqtt-status-badge {
             font-size: 0.8em;
             font-weight: 600;
@@ -1004,8 +1153,8 @@
                 </div>
             </div>
             
-            <!-- Energy Summary -->
-            <div class="card energy-card">
+            <!-- Energy Summary (click to toggle Energy Trend) -->
+            <div class="card energy-card" id="energy-card" title="Click to toggle Energy Trend">
                 <div class="card-header">
                     <div class="card-title">
                         <span class="icon">
@@ -1014,10 +1163,12 @@
                                 <path d="M18 17 L13 9 L9 13 L3 7" fill="none"/>
                             </svg>
                         </span>
-                        Energy Summary
+                        <span id="energy-card-title-text">Energy Summary</span>
                     </div>
+                    <div class="energy-mode-hint" id="energy-mode-hint">click for 24h trend</div>
                 </div>
-                <div class="energy-grid">
+                <div class="energy-body">
+                <div class="energy-grid" id="energy-grid">
                     <div class="energy-item solar">
                         <canvas id="solar-trend" class="trend-chart"></canvas>
                         <div class="energy-label">
@@ -1057,6 +1208,29 @@
                         <div class="energy-value" id="grid-power">-- kW</div>
                         <div class="energy-detail" id="grid-status">--</div>
                     </div>
+                </div>
+                <!-- Energy Trend (overlays the summary grid at the same footprint) -->
+                <div id="energy-trend">
+                    <div class="energy-trend-ranges" id="energy-trend-ranges">
+                        <button data-range="30m">30m</button>
+                        <button data-range="1h">1hr</button>
+                        <button data-range="3h">3hr</button>
+                        <button data-range="6h">6hr</button>
+                        <button data-range="12h">12hr</button>
+                        <button data-range="24h" class="active">24hr</button>
+                        <button data-range="day">Day</button>
+                        <button data-range="fit">Fit</button>
+                    </div>
+                    <div class="energy-trend-legend">
+                        <span class="key"><span class="swatch" style="background: var(--solar-color)"></span>Solar kW</span>
+                        <span class="key"><span class="swatch" style="background: var(--home-color)"></span>Home kW</span>
+                        <span class="key"><span class="swatch" style="background: var(--battery-color)"></span>Battery kW</span>
+                        <span class="key"><span class="swatch" style="background: var(--grid-color)"></span>Grid kW</span>
+                        <span class="key"><span class="swatch dashed"></span>Battery Level % <span style="color: var(--text-muted)">(right axis)</span></span>
+                    </div>
+                    <canvas id="energy-trend-chart"></canvas>
+                    <div class="energy-trend-note" id="energy-trend-note"></div>
+                </div>
                 </div>
             </div>
             
@@ -1249,6 +1423,25 @@
                         <div class="health-label">TLS</div>
                         <div class="health-value" id="mqtt-tls">--</div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Daily Energy (hidden until time-series storage is enabled) -->
+            <div class="card daily-energy-card" id="daily-energy-card" style="display:none">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 2v7" fill="none"/>
+                                <path d="M9 9h6l-3 5h3l-6 8 2-6H8z" fill="none"/>
+                            </svg>
+                        </span>
+                        Daily Energy
+                    </div>
+                    <div class="daily-energy-hint">kWh per day — local time-series storage</div>
+                </div>
+                <div id="daily-energy-content" class="daily-energy-content">
+                    <div class="no-strings">Loading daily energy...</div>
                 </div>
             </div>
         </div>
@@ -1622,6 +1815,334 @@
                 // MQTT endpoint unavailable — silently skip
             }
         }
+
+        // Fetch daily energy totals from the time-series store
+        async function loadDailyEnergy() {
+            const card = document.getElementById('daily-energy-card');
+            const container = document.getElementById('daily-energy-content');
+            try {
+                const todayResp = await fetch('/api/timeseries/today');
+                if (!todayResp.ok) return;
+                const today = await todayResp.json();
+                if (!today.enabled) { card.style.display = 'none'; return; }
+
+                const gwIds = Object.keys(today.gateways || {});
+                if (!gwIds.length) {
+                    card.style.display = '';
+                    container.innerHTML = '<div class="no-strings">No energy samples recorded yet — totals appear after the first polls.</div>';
+                    return;
+                }
+
+                // Recent history (includes today)
+                let days = {};
+                try {
+                    const histResp = await fetch('/api/timeseries/daily?days=8');
+                    if (histResp.ok) {
+                        const hist = await histResp.json();
+                        for (const d of (hist.days || [])) days[d.day] = d.gateways;
+                    }
+                } catch (e) { /* history optional */ }
+
+                const fmt = (v, dp=1) => (v == null ? '--' : v.toFixed(dp));
+                let html = '';
+                const isMulti = Object.keys(gatewayMeta).length > 1;
+
+                for (const gwId of gwIds) {
+                    if (isMulti) html += `<div class="gateway-section-header">${gatewayMeta[gwId]?.name || gwId}</div>`;
+                    const t = today.gateways[gwId] || {};
+                    html += `<div class="daily-grid">
+                        <div class="health-item cat-solar"><div class="health-label">Solar Today</div><div class="health-value">${fmt(t.solar_kwh, 2)} kWh</div></div>
+                        <div class="health-item cat-home"><div class="health-label">Home Today</div><div class="health-value">${fmt(t.home_kwh, 2)} kWh</div></div>
+                        <div class="health-item cat-battery"><div class="health-label">Batt Charged</div><div class="health-value">${fmt(t.battery_charge_kwh, 2)} kWh</div></div>
+                        <div class="health-item cat-battery"><div class="health-label">Batt Discharged</div><div class="health-value">${fmt(t.battery_discharge_kwh, 2)} kWh</div></div>
+                        <div class="health-item cat-grid"><div class="health-label">Grid Import</div><div class="health-value">${fmt(t.grid_import_kwh, 2)} kWh</div></div>
+                        <div class="health-item cat-grid"><div class="health-label">Grid Export</div><div class="health-value">${fmt(t.grid_export_kwh, 2)} kWh</div></div>
+                    </div>`;
+
+                    // History table for this gateway (most recent first)
+                    const rows = Object.entries(days)
+                        .filter(([, gws]) => gws && gws[gwId])
+                        .sort((a, b) => b[0].localeCompare(a[0]))
+                        .slice(0, 7);
+                    if (rows.length) {
+                        const todayKey = t.day;
+                        html += `<table class="daily-table"><thead><tr>
+                            <th>Day</th><th>Solar</th><th>Home</th><th>Batt Chg</th><th>Batt Dchg</th><th>Grid Imp</th><th>Grid Exp</th>
+                        </tr></thead><tbody>`;
+                        for (const [day, gws] of rows) {
+                            const r = gws[gwId];
+                            html += `<tr${day === todayKey ? ' class="today"' : ''}><td>${day}</td>
+                                <td>${fmt(r.solar_kwh)}</td><td>${fmt(r.home_kwh)}</td>
+                                <td>${fmt(r.battery_charge_kwh)}</td><td>${fmt(r.battery_discharge_kwh)}</td>
+                                <td>${fmt(r.grid_import_kwh)}</td><td>${fmt(r.grid_export_kwh)}</td></tr>`;
+                        }
+                        html += '</tbody></table>';
+                    }
+                }
+                card.style.display = '';
+                container.innerHTML = html || '<div class="no-strings">No energy data yet</div>';
+            } catch (e) {
+                // Time-series endpoints unavailable — keep the card hidden
+                console.log('Daily energy not available:', e.message);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // Energy Summary <-> Energy Trend toggle
+        // Clicking the card swaps the live 2x2 tiles for a 24-hour chart
+        // of raw time-series data (kW series + battery level on 2nd axis).
+        // ---------------------------------------------------------------
+        let energyTrendActive = false;
+        let energyTrendSwapping = false;
+        let energyTrendTimer = null;
+        let energyTrendPoints = null;
+        let energyTrendRange = '24h';   // '30m','1h','3h','6h','12h','24h','day','fit'
+        let energyTrendDomain = null;   // {t0, t1} epoch seconds for x-axis
+
+        const TREND_RANGE_MINUTES = { '30m': 30, '1h': 60, '3h': 180, '6h': 360, '12h': 720, '24h': 1440 };
+
+        function toggleEnergyTrend() {
+            if (energyTrendSwapping) return;  // ignore clicks mid-swap
+            energyTrendSwapping = true;
+            energyTrendActive = !energyTrendActive;
+            const card = document.getElementById('energy-card');
+            const body = card.querySelector('.energy-body');
+            // Phase 1: fade the current panel out completely.
+            body.classList.add('swapping');
+            setTimeout(() => {
+                // Phase 2: swap panels while fully transparent. .trend-mode
+                // hides the summary tiles (visibility only) and shows the
+                // trend overlay. The grid stays in flow, so the card keeps
+                // its exact height and the panels below never move.
+                card.classList.toggle('trend-mode', energyTrendActive);
+                document.getElementById('energy-card-title-text').textContent =
+                    energyTrendActive ? 'Energy Trend' : 'Energy Summary';
+                document.getElementById('energy-mode-hint').textContent =
+                    energyTrendActive ? 'click for summary' : 'click for 24h trend';
+                if (energyTrendTimer) { clearInterval(energyTrendTimer); energyTrendTimer = null; }
+                if (energyTrendActive) {
+                    drawEnergyTrendChart();  // size the canvas bitmap to the new box
+                    loadEnergyTrend();
+                    energyTrendTimer = setInterval(loadEnergyTrend, 60000);
+                } else {
+                    energyTrendPoints = null;
+                    energyTrendDomain = null;
+                }
+                // Phase 3: let the swapped panel commit for one frame
+                // (child transitions still suppressed), then fade in.
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        body.classList.remove('swapping');
+                        energyTrendSwapping = false;
+                    });
+                });
+            }, 160);
+        }
+
+        document.querySelectorAll('#energy-trend-ranges button').forEach(btn => {
+            btn.addEventListener('click', ev => {
+                ev.stopPropagation();  // don't toggle the card off
+                energyTrendRange = btn.dataset.range;
+                document.querySelectorAll('#energy-trend-ranges button').forEach(b =>
+                    b.classList.toggle('active', b === btn));
+                loadEnergyTrend();
+            });
+        });
+
+        async function loadEnergyTrend() {
+            const note = document.getElementById('energy-trend-note');
+            const params = new URLSearchParams();
+            const now = Date.now() / 1000;
+            let label;
+            if (energyTrendRange === 'fit') {
+                params.set('fit', 'true');
+                label = 'all retained data';
+            } else if (energyTrendRange === 'day') {
+                // Full local day 0:00 to 23:59
+                const d = new Date();
+                const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
+                params.set('start', midnight);
+                label = 'today 0:00\u201323:59';
+            } else {
+                const mins = TREND_RANGE_MINUTES[energyTrendRange] || 60;
+                params.set('start', Math.round(now - mins * 60));
+                label = `last ${mins >= 60 ? (mins / 60) + 'h' : mins + 'm'}`;
+            }
+            try {
+                const resp = await fetch('/api/timeseries/trend?' + params.toString());
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                if (!data.enabled) {
+                    energyTrendPoints = null;
+                    drawEnergyTrendChart();
+                    note.textContent = 'Energy Trend needs local time-series storage (PW_TIMESERIES_RETENTION not -1).';
+                    return;
+                }
+                const points = data.points || [];
+                // x-axis domain: requested window (day view spans to end of
+                // day even before data exists up to it)
+                let t0, t1;
+                if (energyTrendRange === 'day') {
+                    const d = new Date();
+                    t0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
+                    t1 = t0 + 86399;
+                } else if (energyTrendRange === 'fit') {
+                    // Fitted window from the API (earliest -> latest sample)
+                    t0 = data.start || (points.length ? points[0].ts : now - 86400);
+                    t1 = data.end || now;
+                } else {
+                    t0 = now - (TREND_RANGE_MINUTES[energyTrendRange] || 60) * 60;
+                    t1 = now;
+                }
+                energyTrendDomain = { t0, t1 };
+                if (points.length < 2) {
+                    energyTrendPoints = null;
+                    drawEnergyTrendChart();
+                    note.textContent = 'Not enough raw samples in this window yet \u2014 the trend appears as data accumulates.';
+                    return;
+                }
+                energyTrendPoints = points;
+                const bucketMin = Math.round((data.bucket_seconds || 240) / 60);
+                note.textContent = `${label} \u00b7 ${bucketMin >= 60 ? (bucketMin / 60) + 'h' : bucketMin + ' min'} resolution \u00b7 ${points.length} points`;
+                drawEnergyTrendChart();
+            } catch (e) {
+                energyTrendPoints = null;
+                drawEnergyTrendChart();
+                note.textContent = `Trend data unavailable: ${e.message}`;
+            }
+        }
+
+        // Standard colors: solar yellow, home blue, battery green, grid gray
+        const TREND_COLORS = {
+            solar: '#f0c000',
+            home: '#58a6ff',
+            battery: '#3fb950',
+            grid: '#8b949e'
+        };
+
+        function drawEnergyTrendChart() {
+            const canvas = document.getElementById('energy-trend-chart');
+            if (!canvas) return;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width, H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+            const points = energyTrendPoints;
+            if (!points || points.length < 2 || W < 100) return;
+
+            const padL = 48, padR = 44, padT = 12, padB = 24;
+            const plotW = W - padL - padR, plotH = H - padT - padB;
+            const dom = energyTrendDomain || { t0: points[0].ts, t1: points[points.length - 1].ts };
+            const x0 = dom.t0, x1 = dom.t1;
+            const xSpan = (x1 - x0) || 1;
+            const X = ts => padL + ((ts - x0) / xSpan) * plotW;
+
+            // kW scale (left axis) across solar/home/battery/grid, zero included
+            let minKw = 0, maxKw = 0;
+            for (const p of points) {
+                minKw = Math.min(minKw, p.solar_kw, p.home_kw, p.battery_kw, p.grid_kw);
+                maxKw = Math.max(maxKw, p.solar_kw, p.home_kw, p.battery_kw, p.grid_kw);
+            }
+            if (maxKw === minKw) maxKw = minKw + 1;
+            const Y = kw => padT + (1 - (kw - minKw) / (maxKw - minKw)) * plotH;
+            // Battery level scale (right axis, fixed 0-100%)
+            const Ypct = pct => padT + (1 - Math.max(0, Math.min(100, pct)) / 100) * plotH;
+
+            // Horizontal gridlines + left kW labels / right % labels
+            ctx.font = '11px system-ui, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            for (let i = 0; i <= 4; i++) {
+                const kw = minKw + ((maxKw - minKw) * i) / 4;
+                const y = Y(kw);
+                ctx.strokeStyle = 'rgba(139, 148, 158, 0.15)';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+                ctx.fillStyle = 'rgba(139, 148, 158, 0.8)';
+                ctx.fillText(kw.toFixed(1), padL - 6, y);
+                ctx.textAlign = 'left';
+                ctx.fillText(`${Math.round(i * 25)}%`, W - padR + 6, y);
+                ctx.textAlign = 'right';
+            }
+
+            // Zero line (battery/grid swing negative)
+            if (minKw < 0) {
+                const zy = Y(0);
+                ctx.strokeStyle = 'rgba(139, 148, 158, 0.4)';
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath(); ctx.moveTo(padL, zy); ctx.lineTo(W - padR, zy); ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(139, 148, 158, 0.9)';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('0', padL - 6, zy);
+            }
+
+            // Time axis labels (~6 ticks), e.g. "4p"
+            ctx.fillStyle = 'rgba(139, 148, 158, 0.8)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            const ticks = Math.min(6, points.length - 1);
+            for (let i = 0; i <= ticks; i++) {
+                const ts = x0 + (xSpan * i) / ticks;
+                const d = new Date(ts * 1000);
+                const h = d.getHours();
+                const label = `${h % 12 || 12}${h >= 12 ? 'p' : 'a'}`;
+                ctx.fillText(label, X(ts), H - padB + 6);
+            }
+
+            const drawSeries = (key, color, dashed, yScale, fill) => {
+                // Collect contiguous segments (gaps where v == null)
+                const segments = [];
+                let seg = [];
+                for (const p of points) {
+                    const v = p[key];
+                    if (v == null) {
+                        if (seg.length > 1) segments.push(seg);
+                        seg = [];
+                    } else {
+                        seg.push([X(p.ts), yScale(v)]);
+                    }
+                }
+                if (seg.length > 1) segments.push(seg);
+                for (const s of segments) {
+                    if (fill) {
+                        // Translucent fill between line and zero axis
+                        const zy = Y(0);
+                        ctx.fillStyle = color;
+                        ctx.globalAlpha = 0.12;
+                        ctx.beginPath();
+                        ctx.moveTo(s[0][0], zy);
+                        for (const [sx, sy] of s) ctx.lineTo(sx, sy);
+                        ctx.lineTo(s[s.length - 1][0], zy);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.globalAlpha = 1;
+                    }
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1.8;
+                    if (dashed) ctx.setLineDash([5, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(s[0][0], s[0][1]);
+                    for (let i = 1; i < s.length; i++) ctx.lineTo(s[i][0], s[i][1]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            };
+
+            drawSeries('solar_kw', TREND_COLORS.solar, false, Y, true);
+            drawSeries('home_kw', TREND_COLORS.home, false, Y, true);
+            drawSeries('battery_kw', TREND_COLORS.battery, false, Y, true);
+            drawSeries('grid_kw', TREND_COLORS.grid, false, Y, true);
+            drawSeries('battery_level', TREND_COLORS.battery, true, Ypct, false);
+        }
+
+        document.getElementById('energy-card').addEventListener('click', toggleEnergyTrend);
+        window.addEventListener('resize', () => {
+            if (energyTrendActive) drawEnergyTrendChart();
+        });
 
         async function loadStats() {
             try {
@@ -2157,6 +2678,7 @@
             loadPowerwalls();
             loadGateways();
             loadMqtt();
+            loadDailyEnergy();
 
             // Refresh secondary data periodically
             setInterval(() => {
@@ -2166,6 +2688,7 @@
                 loadPowerwalls();
                 loadGateways();
                 loadMqtt();
+                loadDailyEnergy();
             }, 30000);
         })();
 

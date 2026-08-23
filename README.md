@@ -193,6 +193,33 @@ exponential backoff (60s → 300s max). Fallback state is exposed in `/health`
 and `/stats`. `POST /health/reset` clears fallback state (requires
 `PW_CONTROL_SECRET`). Only active in TEDAPI mode — no overhead for Cloud/FleetAPI.
 
+**Time-Series Storage (Daily Energy Stats):**
+```bash
+PW_TIMESERIES_RETENTION=24h            # Raw 5s sample retention (default: 24h)
+PW_TIMESERIES_DAILY_RETENTION=0        # Daily kWh aggregate retention (default: 0 = unlimited)
+PW_TIMESERIES_PATH=/data/timeseries.db  # SQLite path (default: /data/timeseries.db if /data exists)
+```
+The server records every poll cycle's power readings to a local SQLite
+store (WAL mode) and derives daily energy totals per gateway via trapezoidal
+integration: solar, home consumption, battery charge/discharge, grid
+import/export — each tracked directionally (never netted). Totals reset at
+local midnight using each gateway's configured timezone, survive restarts,
+and show in the web console's **Daily Energy** panel plus the
+`/api/timeseries/*` endpoints. Raw samples also capture battery level
+(state of charge) per poll — kept for the raw retention window only, never
+downsampled into daily aggregates. Clicking the console's **Energy Summary**
+panel toggles it into an **Energy Trend** view: the last 24 hours of raw
+data charted as Solar/Home/Battery/Grid kW (shared left axis) plus Battery
+Level % (dashed, right axis), using the standard color coding. Raw samples
+are pruned to the retention
+window (keeping the last hour for troubleshooting); daily aggregates are one
+tiny row per gateway per day (~100 B/day) so unlimited retention is the
+sensible default. Intervals longer than 1 hour (outage/gap) are never
+integrated — no fabricated energy. Set `PW_TIMESERIES_RETENTION=-1` to
+disable the subsystem entirely for headless proxy deployments (no SQLite
+file, no writes, UI panel hidden). Retention accepts `90s`, `48h`, `7d`,
+`30d`, `365d` style values; `0` = unlimited.
+
 ### Configuration File (gateways.yaml)
 
 Pass a YAML (or JSON) config file with `--config gateways.yaml` or
@@ -440,6 +467,15 @@ All existing proxy endpoints work unchanged:
 - `GET /api/aggregate/power` - Combined power across all gateways
 - `GET /api/aggregate/soe` - Total battery capacity and charge
 - `GET /api/aggregate/status` - Health status of all gateways
+
+**Time-Series Endpoints (Daily Energy):**
+- `GET /api/timeseries/today` - Today's running kWh totals per gateway
+- `GET /api/timeseries/daily?days=7` - Daily kWh totals (per gateway/category)
+- `GET /api/timeseries/trend?hours=24` - Bucketed kW + battery level for charting (per-gateway mean, summed across gateways)
+- `GET /api/timeseries/samples` - Raw samples (troubleshooting; filters: `gateway`, `start`, `end`, `limit`) — includes battery level (`soe`)
+- `GET /api/timeseries/status` - Subsystem status, retention settings, DB size
+
+All report `{"enabled": false, ...}` when disabled (`PW_TIMESERIES_RETENTION=-1`).
 
 **WebSocket Endpoints:**
 - `WS /ws/gateway/{id}` - Real-time data stream for specific gateway

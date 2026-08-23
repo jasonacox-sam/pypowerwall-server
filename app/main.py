@@ -67,7 +67,7 @@ from typing import Optional
 from app.api.auth import verify_control_token
 
 from app.config import settings, SERVER_VERSION
-from app.api import legacy, gateways, aggregates, websockets
+from app.api import legacy, gateways, aggregates, websockets, timeseries
 from app.core.gateway_manager import gateway_manager
 from app.utils.transform import get_static
 from app.utils.stats_tracker import stats_tracker
@@ -322,6 +322,7 @@ static_path = Path(__file__).parent / "static"
 # routes are not shadowed by legacy endpoints that share the /api/* path prefix.
 app.include_router(gateways.router, prefix="/api/gateways", tags=["Gateways"])
 app.include_router(aggregates.router, prefix="/api/aggregate", tags=["Aggregates"])
+app.include_router(timeseries.router, prefix="/api/timeseries", tags=["TimeSeries"])
 app.include_router(websockets.router, prefix="/ws", tags=["WebSockets"])
 
 app.include_router(legacy.router, tags=["Legacy Proxy Compatibility"])
