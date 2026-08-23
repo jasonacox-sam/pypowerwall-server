@@ -1139,7 +1139,9 @@ class GatewayManager:
         Runs after the cache update on every successful poll cycle. Storage
         failures are logged and swallowed — statistics must never break
         polling. Samples are awaited (not fire-and-forget) so each gateway's
-        samples stay strictly ordered for trapezoidal integration.
+        samples stay strictly ordered for trapezoidal integration, but capped
+        by a timeout so a hung SQLite write (disk full, dying flash) can
+        never stall the poll loop.
         """
         try:
             aggregates = data.aggregates or {}
@@ -1154,15 +1156,23 @@ class GatewayManager:
                 ts = datetime.now().timestamp()
             from app.core.timeseries import get_timeseries_store
 
-            await get_timeseries_store().record_sample(
-                gateway_id=gateway_id,
-                ts=ts,
-                solar_w=solar,
-                home_w=load,
-                battery_w=battery,
-                site_w=site,
-                soe=data.soe,
-                timezone=gateway.timezone,
+            await asyncio.wait_for(
+                get_timeseries_store().record_sample(
+                    gateway_id=gateway_id,
+                    ts=ts,
+                    solar_w=solar,
+                    home_w=load,
+                    battery_w=battery,
+                    site_w=site,
+                    soe=data.soe,
+                    timezone=gateway.timezone,
+                ),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Time-series sample write timed out for %s — polling continues",
+                gateway_id,
             )
         except Exception as e:
             logger.debug(f"Time-series sample recording failed for {gateway_id}: {e}")

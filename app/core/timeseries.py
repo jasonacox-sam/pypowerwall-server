@@ -93,6 +93,9 @@ RAW_KEEP_FLOOR = 3600.0
 # Maintenance (pruning) cadence in seconds.
 MAINTENANCE_INTERVAL = 60.0
 
+# Minimum seconds between repeated write-failure warnings.
+_FAILURE_WARN_INTERVAL = 300.0
+
 # UTC fallback zoneinfo object for gateways with unresolvable timezones.
 _UTC = ZoneInfo("UTC")
 
@@ -201,6 +204,10 @@ class TimeSeriesStore:
         self._conn: Optional[sqlite3.Connection] = None
         self._executor: Optional[ThreadPoolExecutor] = None
         self._maintenance_task: Optional[asyncio.Task] = None
+        # Write-failure tracking: surfaced in status(), warned at most once
+        # per _FAILURE_WARN_INTERVAL so a full disk is visible without spam.
+        self._write_failures = 0
+        self._last_failure_warn = 0.0
         # In-memory cache of the last integrated sample per gateway:
         # {gateway_id: {"ts": float, "values": {category: watts}}}
         self._state: Dict[str, Dict[str, Any]] = {}
@@ -440,8 +447,20 @@ class TimeSeriesStore:
                         return self._get_day_row(gateway_id, today, conn)
                 return None
             except Exception as e:  # storage must never break polling
-                logger.debug("TimeSeriesStore sample write failed: %s", e)
+                self._note_write_failure(e)
                 return None
+
+    def _note_write_failure(self, exc: Exception) -> None:
+        """Count a failed write; warn at most once per interval."""
+        self._write_failures += 1
+        now = time.time()
+        if now - self._last_failure_warn >= _FAILURE_WARN_INTERVAL:
+            self._last_failure_warn = now
+            logger.warning(
+                "TimeSeriesStore sample write failed (%d total): %s",
+                self._write_failures,
+                exc,
+            )
 
     def _load_state(
         self, gateway_id: str, conn: sqlite3.Connection
@@ -791,10 +810,11 @@ class TimeSeriesStore:
                 "enabled": False,
                 "retention_seconds": -1,
                 "daily_retention_seconds": self._daily_retention,
-                "db_path": None,
+                "db_file": None,
                 "db_size_bytes": 0,
                 "samples": 0,
                 "daily_rows": 0,
+                "write_failures": 0,
                 "gateways": [],
             }
         loop = asyncio.get_running_loop()
@@ -828,10 +848,13 @@ class TimeSeriesStore:
             "enabled": True,
             "retention_seconds": self._retention,
             "daily_retention_seconds": self._daily_retention,
-            "db_path": self._db_path,
+            # Filename only — the unauthenticated status endpoint must not
+            # disclose filesystem layout (matches the /stats masking policy).
+            "db_file": os.path.basename(self._db_path),
             "db_size_bytes": db_size,
             "samples": samples,
             "daily_rows": daily_rows,
+            "write_failures": self._write_failures,
             "gateways": gateways,
         }
 
@@ -925,7 +948,8 @@ class TimeSeriesStore:
                 self._conn = None
             self._state.clear()
         if self._executor is not None:
-            self._executor.shutdown(wait=False)
+            # cancel_futures: queued writes must not reopen the closed DB
+            self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None
 
 

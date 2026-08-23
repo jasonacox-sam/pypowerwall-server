@@ -239,9 +239,15 @@
         }
         /* The summary grid always stays in flow and defines the card height;
            the trend panel overlays it at the same footprint so flipping
-           between the two never shifts the panels below. */
+           between the two never shifts the panels below. The swap is
+           two-phase: fade out, switch panels while fully transparent, fade
+           back in — the two panels never show at the same time. */
         .energy-body {
             position: relative;
+            transition: opacity 150ms ease;
+        }
+        .energy-body.swapping {
+            opacity: 0;
         }
         #energy-trend {
             position: absolute;
@@ -1879,6 +1885,7 @@
         // of raw time-series data (kW series + battery level on 2nd axis).
         // ---------------------------------------------------------------
         let energyTrendActive = false;
+        let energyTrendSwapping = false;
         let energyTrendTimer = null;
         let energyTrendPoints = null;
         let energyTrendRange = 'day';   // '30m','1h','3h','6h','12h','day','fit'
@@ -1887,25 +1894,38 @@
         const TREND_RANGE_MINUTES = { '30m': 30, '1h': 60, '3h': 180, '6h': 360, '12h': 720 };
 
         function toggleEnergyTrend() {
+            if (energyTrendSwapping) return;  // ignore clicks mid-swap
+            energyTrendSwapping = true;
             energyTrendActive = !energyTrendActive;
             const card = document.getElementById('energy-card');
-            // .trend-mode hides the summary tiles (visibility only) and shows
-            // the trend panel as an overlay. The grid stays in flow, so the
-            // card keeps its exact height and the panels below never move.
-            card.classList.toggle('trend-mode', energyTrendActive);
-            document.getElementById('energy-card-title-text').textContent =
-                energyTrendActive ? 'Energy Trend' : 'Energy Summary';
-            document.getElementById('energy-mode-hint').textContent =
-                energyTrendActive ? 'click for summary' : 'click for 24h trend';
-            if (energyTrendTimer) { clearInterval(energyTrendTimer); energyTrendTimer = null; }
-            if (energyTrendActive) {
-                drawEnergyTrendChart();  // size the canvas bitmap to the new box
-                loadEnergyTrend();
-                energyTrendTimer = setInterval(loadEnergyTrend, 60000);
-            } else {
-                energyTrendPoints = null;
-                energyTrendDomain = null;
-            }
+            const body = card.querySelector('.energy-body');
+            // Phase 1: fade the current panel out completely.
+            body.classList.add('swapping');
+            setTimeout(() => {
+                // Phase 2: swap panels while fully transparent. .trend-mode
+                // hides the summary tiles (visibility only) and shows the
+                // trend overlay. The grid stays in flow, so the card keeps
+                // its exact height and the panels below never move.
+                card.classList.toggle('trend-mode', energyTrendActive);
+                document.getElementById('energy-card-title-text').textContent =
+                    energyTrendActive ? 'Energy Trend' : 'Energy Summary';
+                document.getElementById('energy-mode-hint').textContent =
+                    energyTrendActive ? 'click for summary' : 'click for 24h trend';
+                if (energyTrendTimer) { clearInterval(energyTrendTimer); energyTrendTimer = null; }
+                if (energyTrendActive) {
+                    drawEnergyTrendChart();  // size the canvas bitmap to the new box
+                    loadEnergyTrend();
+                    energyTrendTimer = setInterval(loadEnergyTrend, 60000);
+                } else {
+                    energyTrendPoints = null;
+                    energyTrendDomain = null;
+                }
+                // Phase 3: fade the new panel in.
+                requestAnimationFrame(() => {
+                    body.classList.remove('swapping');
+                    energyTrendSwapping = false;
+                });
+            }, 160);
         }
 
         document.querySelectorAll('#energy-trend-ranges button').forEach(btn => {

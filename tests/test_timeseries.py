@@ -322,6 +322,9 @@ class TestPersistenceAndMaintenance:
         assert s["samples"] == 2
         assert s["db_size_bytes"] > 0
         assert "gw1" in s["gateways"]
+        assert s["write_failures"] == 0
+        # Status must not disclose the filesystem path (only the filename)
+        assert s["db_file"] == "ts.db"
         await store.stop()
 
     @pytest.mark.asyncio
@@ -355,7 +358,7 @@ class TestDisabled:
         assert (await store.get_daily_energy())["enabled"] is False
         assert (await store.get_samples())["enabled"] is False
         s = await store.status()
-        assert s["enabled"] is False and s["db_path"] is None
+        assert s["enabled"] is False and s["db_file"] is None
         await store.stop()
         assert not db.exists()  # nothing was ever written
 
