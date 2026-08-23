@@ -237,6 +237,28 @@
             grid-column: span 6;
             cursor: pointer;
         }
+        /* The summary grid always stays in flow and defines the card height;
+           the trend panel overlays it at the same footprint so flipping
+           between the two never shifts the panels below. */
+        .energy-body {
+            position: relative;
+        }
+        #energy-trend {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .energy-card.trend-mode .energy-grid {
+            visibility: hidden;
+        }
+        .energy-card.trend-mode #energy-trend {
+            display: flex;
+        }
         .energy-mode-hint {
             font-size: 0.8em;
             color: var(--text-secondary);
@@ -244,6 +266,7 @@
         .energy-trend-legend {
             display: flex;
             flex-wrap: wrap;
+            flex-shrink: 0;
             gap: 6px 16px;
             font-size: 0.8em;
             color: var(--text-secondary);
@@ -265,12 +288,15 @@
         }
         #energy-trend-chart {
             width: 100%;
-            height: 240px;
+            flex: 1 1 auto;
+            min-height: 140px;
+            height: auto;
             display: block;
         }
         .energy-trend-ranges {
             display: flex;
             flex-wrap: wrap;
+            flex-shrink: 0;
             gap: 4px;
             margin-bottom: 8px;
         }
@@ -292,6 +318,7 @@
             background: rgba(139, 148, 158, 0.2);
         }
         .energy-trend-note {
+            flex-shrink: 0;
             font-size: 0.8em;
             color: var(--text-muted);
             margin-top: 6px;
@@ -1127,6 +1154,7 @@
                     </div>
                     <div class="energy-mode-hint" id="energy-mode-hint">click for 24h trend</div>
                 </div>
+                <div class="energy-body">
                 <div class="energy-grid" id="energy-grid">
                     <div class="energy-item solar">
                         <canvas id="solar-trend" class="trend-chart"></canvas>
@@ -1168,8 +1196,8 @@
                         <div class="energy-detail" id="grid-status">--</div>
                     </div>
                 </div>
-                <!-- Energy Trend (shown while the card is toggled) -->
-                <div id="energy-trend" style="display:none">
+                <!-- Energy Trend (overlays the summary grid at the same footprint) -->
+                <div id="energy-trend">
                     <div class="energy-trend-ranges" id="energy-trend-ranges">
                         <button data-range="30m">30m</button>
                         <button data-range="1h">1hr</button>
@@ -1188,6 +1216,7 @@
                     </div>
                     <canvas id="energy-trend-chart"></canvas>
                     <div class="energy-trend-note" id="energy-trend-note"></div>
+                </div>
                 </div>
             </div>
             
@@ -1860,15 +1889,17 @@
         function toggleEnergyTrend() {
             energyTrendActive = !energyTrendActive;
             const card = document.getElementById('energy-card');
+            // .trend-mode hides the summary tiles (visibility only) and shows
+            // the trend panel as an overlay. The grid stays in flow, so the
+            // card keeps its exact height and the panels below never move.
             card.classList.toggle('trend-mode', energyTrendActive);
-            document.getElementById('energy-grid').style.display = energyTrendActive ? 'none' : '';
-            document.getElementById('energy-trend').style.display = energyTrendActive ? '' : 'none';
             document.getElementById('energy-card-title-text').textContent =
                 energyTrendActive ? 'Energy Trend' : 'Energy Summary';
             document.getElementById('energy-mode-hint').textContent =
-                energyTrendActive ? 'click to return' : 'click for 24h trend';
+                energyTrendActive ? 'click for summary' : 'click for 24h trend';
             if (energyTrendTimer) { clearInterval(energyTrendTimer); energyTrendTimer = null; }
             if (energyTrendActive) {
+                drawEnergyTrendChart();  // size the canvas bitmap to the new box
                 loadEnergyTrend();
                 energyTrendTimer = setInterval(loadEnergyTrend, 60000);
             } else {
