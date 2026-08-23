@@ -434,6 +434,39 @@ class TestTrend:
         trend = await store.get_trend()
         assert trend == {"enabled": False, "points": [], "count": 0}
 
+    @pytest.mark.asyncio
+    async def test_trend_explicit_window_and_fit(self, tmp_path):
+        """start/end define an arbitrary window; fit spans all samples."""
+        store = TimeSeriesStore(db_path=str(tmp_path / "ts.db"))
+        now = time.time()
+        # Old sample well outside a 1h window, recent samples inside it
+        await record(store, now - 48 * 3600, solar=9000, gw="a")
+        await record(store, now - 600, solar=1000, gw="a")
+        await record(store, now - 300, solar=2000, gw="a")
+
+        # Explicit window: last 30 minutes only -> 60s buckets, one point
+        # per bucket; the 48h-old sample is excluded
+        trend = await store.get_trend(start=now - 1800, end=now)
+        assert trend["enabled"] is True
+        assert trend["start"] == pytest.approx(now - 1800)
+        assert trend["end"] == pytest.approx(now)
+        assert trend["bucket_seconds"] == 60
+        assert trend["count"] == 2
+        values = sorted(p["solar_kw"] for p in trend["points"])
+        assert values == pytest.approx([1.0, 2.0])
+        assert all(p["solar_kw"] < 9.0 for p in trend["points"])
+
+        # end in the future is honored as-is (bucket sizing follows span)
+        future = await store.get_trend(start=now - 1800, end=now + 3600)
+        assert future["end"] == pytest.approx(now + 3600)
+
+        # Fit: spans back to the 48h-old sample
+        fit = await store.get_trend(fit=True)
+        assert fit["start"] <= now - 48 * 3600
+        assert fit["bucket_seconds"] == 480  # 48h span -> 8min buckets
+        assert fit["count"] >= 2
+        await store.stop()
+
 
 # ---------------------------------------------------------------------------
 # API endpoints (uses the app TestClient; conftest isolates the DB path)

@@ -604,9 +604,14 @@ class TimeSeriesStore:
             return self._get_day_row(gateway_id, today, conn)
 
     async def get_trend(
-        self, hours: int = 24, gateway: Optional[str] = None
+        self,
+        hours: int = 24,
+        gateway: Optional[str] = None,
+        start: Optional[float] = None,
+        end: Optional[float] = None,
+        fit: bool = False,
     ) -> Dict[str, Any]:
-        """Bucketed time series for charting (last ``hours`` of raw data).
+        """Bucketed time series for charting.
 
         Raw 5s samples are averaged into ~240-second buckets (per gateway,
         then summed across gateways) so a 24-hour window returns ~360 points
@@ -617,23 +622,40 @@ class TimeSeriesStore:
         samples — it is never downsampled into daily aggregates.
 
         Args:
-            hours:   Window length (1-168).
+            hours:   Window length (1-168) when no explicit ``start``.
             gateway: Restrict to one gateway ID (None = all, summed).
+            start:   Explicit window start (epoch seconds). Overrides
+                     ``hours``.
+            end:     Explicit window end (epoch seconds); default now.
+            fit:     Use all retained raw data (earliest sample -> now).
         """
         if not self.enabled:
             return {"enabled": False, "points": [], "count": 0}
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            self._ensure_executor(), partial(self._get_trend_sync, hours, gateway)
+            self._ensure_executor(),
+            partial(self._get_trend_sync, hours, gateway, start, end, fit),
         )
 
-    def _get_trend_sync(self, hours: int, gateway: Optional[str]) -> Dict[str, Any]:
+    def _get_trend_sync(
+        self,
+        hours: int,
+        gateway: Optional[str],
+        start: Optional[float] = None,
+        end: Optional[float] = None,
+        fit: bool = False,
+    ) -> Dict[str, Any]:
         hours = max(1, min(int(hours), 168))
         now = time.time()
-        span = hours * 3600.0
+        if start is None:
+            span = hours * 3600.0
+            start = now - span
+        end = end or (now + 300.0)  # +300s tolerance for clock skew
+        # No clamp to now: raw samples may sit slightly in the future
+        # (clock skew / rounding) and excluding them drops live buckets.
+        span = max(60.0, end - start)
         # Target ~360 buckets, rounded to a whole minute, never below 60s.
         bucket = max(60.0, round(span / 360.0 / 60.0) * 60.0)
-        start = now - span
         with self._lock:
             try:
                 conn = self._ensure_conn()
@@ -645,7 +667,15 @@ class TimeSeriesStore:
                     "count": 0,
                     "bucket_seconds": bucket,
                     "hours": hours,
+                    "start": start,
+                    "end": end,
                 }
+            if fit:
+                row = conn.execute("SELECT MIN(ts) AS m FROM samples").fetchone()
+                if row is not None and row["m"] is not None and row["m"] < start:
+                    start = float(row["m"])
+            span = max(60.0, end - start)
+            bucket = max(60.0, round(span / 360.0 / 60.0) * 60.0)
             # Inner query: mean per (bucket, gateway) so multi-gateway setups
             # sum instead of average; outer query collapses to fleet totals
             # (mean SoE). Single-gateway deployments get plain bucket means.
@@ -662,13 +692,20 @@ class TimeSeriesStore:
                 "AVG(home_w) AS home_avg, "
                 "AVG(battery_discharge_w - battery_charge_w) AS batt_avg, "
                 "AVG(grid_import_w - grid_export_w) AS grid_avg, "
-                "AVG(soe) AS soe_avg FROM samples WHERE ts>=? "
+                "AVG(soe) AS soe_avg FROM samples WHERE ts>=? AND ts<=? "
                 + gw_filter
                 + "GROUP BY bstart, gateway_id) "
                 "GROUP BY bstart ORDER BY bstart"
             )
             rows = conn.execute(
-                sql, (bucket, bucket, start, *((gateway,) if gateway else ()))
+                sql,
+                (
+                    bucket,
+                    bucket,
+                    start,
+                    end,
+                    *((gateway,) if gateway else ()),
+                ),
             ).fetchall()
             points = [
                 {
@@ -685,6 +722,8 @@ class TimeSeriesStore:
                 "enabled": True,
                 "hours": hours,
                 "bucket_seconds": bucket,
+                "start": start,
+                "end": end,
                 "points": points,
                 "count": len(points),
                 "last_updated": now,

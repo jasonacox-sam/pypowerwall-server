@@ -17,9 +17,12 @@ Query Parameters:
              gateway (str, optional) — restrict to a single gateway ID
     today:   none — returns every configured gateway's running totals
     trend:   hours (int, default 24, max 168) — window length; gateway
-             (str, optional) restricts to one gateway. Returns ~360
-             bucket-averaged points: solar/home/battery/grid kW plus mean
-             battery level (%) per bucket.
+             (str, optional) restricts to one gateway. start (unix ts,
+             optional) overrides hours with an explicit window start;
+             end (unix ts, optional) explicit window end (default now);
+             fit (bool, optional, default false) uses all retained raw
+             data. Returns ~360 bucket-averaged points: solar/home/
+             battery/grid kW plus mean battery level (%) per bucket.
     samples: gateway (str, optional), start (unix ts), end (unix ts),
              limit (int, default 500, max 10000)
 
@@ -87,6 +90,9 @@ async def get_today():
 async def get_trend(
     hours: int = Query(default=24, ge=1, le=168),
     gateway: Optional[str] = Query(default=None),
+    start: Optional[float] = Query(default=None),
+    end: Optional[float] = Query(default=None),
+    fit: bool = Query(default=False),
 ):
     """Bucketed time series of power (kW) and battery level (%) for charts.
 
@@ -96,7 +102,9 @@ async def get_trend(
     is mean state of charge per bucket (raw-sample only, never persisted
     into daily aggregates).
     """
-    return await get_timeseries_store().get_trend(hours=hours, gateway=gateway)
+    return await get_timeseries_store().get_trend(
+        hours=hours, gateway=gateway, start=start, end=end, fit=fit
+    )
 
 
 @router.get("/samples")
