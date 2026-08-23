@@ -11,6 +11,10 @@ A high-performance FastAPI-based server for monitoring and managing Tesla Powerw
 
 <img alt="PyPowerwall Server Console" src="https://github.com/user-attachments/assets/9ea75c12-6f01-4825-9695-a9c965dbc874" />
 
+The **Energy** panel toggles between **Energy Summary** (current kW totals) and **Energy Trend** (raw kW data with battery level % overlay).
+
+<img width="814" height="291" alt="PyPowerwall Server Console - Trend" src="https://github.com/user-attachments/assets/3fac475e-aebd-46a8-8c2d-8c4d294b2360" />
+
 ## Features
 
 - **Multi-Gateway Support** - Monitor multiple Powerwall installations from a single server with per-gateway configuration and aggregated metrics
@@ -203,7 +207,7 @@ and `/stats`. `POST /health/reset` clears fallback state (requires
 ```bash
 PW_TIMESERIES_RETENTION=24h            # Raw 5s sample retention (default: 24h)
 PW_TIMESERIES_DAILY_RETENTION=0        # Daily kWh aggregate retention (default: 0 = unlimited)
-PW_TIMESERIES_PATH=/data/timeseries.db  # SQLite path (default: /data/timeseries.db if /data exists)
+PW_TIMESERIES_PATH=/data/timeseries.db  # SQLite path (default: /data/timeseries.db)
 ```
 The server records every poll cycle's power readings to a local SQLite
 store (WAL mode) and derives daily energy totals per gateway via trapezoidal
