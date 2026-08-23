@@ -40,6 +40,7 @@ docker run -d \
   --network host \
   -e PW_HOST=192.168.91.1 \
   -e PW_GW_PWD=your_gateway_password \
+  -v pws-data:/data \
   jasonacox/pypowerwall-server
 ```
 
@@ -56,10 +57,13 @@ docker run -d \
   -e PW_RSA_KEY_PATH=/keys/tedapi_rsa_private.pem \
   -e PW_WIFI_HOST=192.168.91.1 \
   -v /path/to/keys:/keys \
+  -v pws-data:/data \
   jasonacox/pypowerwall-server
 ```
 
 > **Note:** `PW_WIFI_HOST` is the IP address pypowerwall uses for the WiFi fallback path in v1r mode. It defaults to `192.168.91.1`. Only set it if your gateway is on a different IP (e.g. behind a travel router).
+>
+> **Note:** The `-v pws-data:/data` mount persists the daily energy history (SQLite time-series store) across container upgrades. Omit it if you run with `PW_TIMESERIES_RETENTION=-1` (subsystem disabled).
 
 #### Cloud Mode (Remote Access)
 
@@ -69,6 +73,7 @@ docker run -d \
   --name pypowerwall-server \
   -p 8675:8675 \
   -v ~/.pypowerwall:/auth \
+  -v pws-data:/data \
   -e PW_EMAIL="your@email.com" \
   -e PW_AUTH_PATH=/auth \
   jasonacox/pypowerwall-server
@@ -86,6 +91,7 @@ The PyPowerwall Server will be running at: http://localhost:8675 (if not running
 docker run -d \
   --name pypowerwall-server \
   --network host \
+  -v pws-data:/data \
   -e PW_GATEWAYS='[
     {"id": "home", "name": "Home Gateway", "host": "192.168.91.1", "gw_pwd": "gateway_password_1"},
     {"id": "cabin", "name": "Cabin Gateway", "host": "192.168.91.2", "gw_pwd": "gateway_password_2"},
