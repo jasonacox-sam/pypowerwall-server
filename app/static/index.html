@@ -249,6 +249,13 @@
         .energy-body.swapping {
             opacity: 0;
         }
+        /* .energy-item has transition:all, which animates the inherited
+           visibility change — tiles would linger 200ms into the fade-in.
+           Suppress child transitions while swapping so the switch is
+           instant while the body is transparent. */
+        .energy-body.swapping * {
+            transition: none !important;
+        }
         #energy-trend {
             position: absolute;
             top: 0;
@@ -1920,10 +1927,13 @@
                     energyTrendPoints = null;
                     energyTrendDomain = null;
                 }
-                // Phase 3: fade the new panel in.
+                // Phase 3: let the swapped panel commit for one frame
+                // (child transitions still suppressed), then fade in.
                 requestAnimationFrame(() => {
-                    body.classList.remove('swapping');
-                    energyTrendSwapping = false;
+                    requestAnimationFrame(() => {
+                        body.classList.remove('swapping');
+                        energyTrendSwapping = false;
+                    });
                 });
             }, 160);
         }
