@@ -468,6 +468,16 @@ class TestTrend:
         assert fit["start"] <= now - 48 * 3600
         assert fit["bucket_seconds"] == 480  # 48h span -> 8min buckets
         assert fit["count"] >= 2
+
+        # Fit window ends at the newest sample, not "now" — the data fills
+        # the full graph width
+        assert fit["end"] == pytest.approx(now - 300)
+
+        # Gateway-filtered fit spans only that gateway's samples
+        await record(store, now - 60, solar=500, gw="b")
+        fit_b = await store.get_trend(fit=True, gateway="b")
+        assert fit_b["start"] == pytest.approx(now - 60)
+        assert fit_b["end"] == pytest.approx(now - 60)
         await store.stop()
 
 

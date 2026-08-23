@@ -646,7 +646,8 @@ class TimeSeriesStore:
             start:   Explicit window start (epoch seconds). Overrides
                      ``hours``.
             end:     Explicit window end (epoch seconds); default now.
-            fit:     Use all retained raw data (earliest sample -> now).
+            fit:     Fit the window to the full range of retained raw data
+                     (earliest → latest sample, per gateway when filtered).
         """
         if not self.enabled:
             return {"enabled": False, "points": [], "count": 0}
@@ -690,9 +691,16 @@ class TimeSeriesStore:
                     "end": end,
                 }
             if fit:
-                row = conn.execute("SELECT MIN(ts) AS m FROM samples").fetchone()
-                if row is not None and row["m"] is not None and row["m"] < start:
-                    start = float(row["m"])
+                # Fit spans the full range of retained raw data (per gateway
+                # when filtered); span floor below handles the 1-sample case.
+                row = conn.execute(
+                    "SELECT MIN(ts) AS lo, MAX(ts) AS hi FROM samples"
+                    + (" WHERE gateway_id=?" if gateway else ""),
+                    ((gateway,) if gateway else ()),
+                ).fetchone()
+                if row is not None and row["lo"] is not None:
+                    start = float(row["lo"])
+                    end = float(row["hi"])
             span = max(60.0, end - start)
             bucket = max(60.0, round(span / 360.0 / 60.0) * 60.0)
             # Inner query: mean per (bucket, gateway) so multi-gateway setups

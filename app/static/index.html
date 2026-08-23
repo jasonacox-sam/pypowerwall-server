@@ -1217,7 +1217,8 @@
                         <button data-range="3h">3hr</button>
                         <button data-range="6h">6hr</button>
                         <button data-range="12h">12hr</button>
-                        <button data-range="day" class="active">24hr</button>
+                        <button data-range="24h" class="active">24hr</button>
+                        <button data-range="day">Day</button>
                         <button data-range="fit">Fit</button>
                     </div>
                     <div class="energy-trend-legend">
@@ -1895,10 +1896,10 @@
         let energyTrendSwapping = false;
         let energyTrendTimer = null;
         let energyTrendPoints = null;
-        let energyTrendRange = 'day';   // '30m','1h','3h','6h','12h','day','fit'
+        let energyTrendRange = '24h';   // '30m','1h','3h','6h','12h','24h','day','fit'
         let energyTrendDomain = null;   // {t0, t1} epoch seconds for x-axis
 
-        const TREND_RANGE_MINUTES = { '30m': 30, '1h': 60, '3h': 180, '6h': 360, '12h': 720 };
+        const TREND_RANGE_MINUTES = { '30m': 30, '1h': 60, '3h': 180, '6h': 360, '12h': 720, '24h': 1440 };
 
         function toggleEnergyTrend() {
             if (energyTrendSwapping) return;  // ignore clicks mid-swap
@@ -1986,8 +1987,9 @@
                     t0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000;
                     t1 = t0 + 86399;
                 } else if (energyTrendRange === 'fit') {
+                    // Fitted window from the API (earliest -> latest sample)
                     t0 = data.start || (points.length ? points[0].ts : now - 86400);
-                    t1 = now;
+                    t1 = data.end || now;
                 } else {
                     t0 = now - (TREND_RANGE_MINUTES[energyTrendRange] || 60) * 60;
                     t1 = now;
