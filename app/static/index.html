@@ -2340,6 +2340,8 @@
                     mode = 'FleetAPI';
                 } else if (stats.cloudmode) {
                     mode = 'Cloud';
+                } else if (stats.basiclan) {
+                    mode = 'Basic LAN';
                 } else if (stats.tedapi) {
                     const hasRsaKey = Object.values(gatewayMeta).some(gw => gw.rsa_key_configured);
                     mode = hasRsaKey ? 'TEDAPI v1r' : 'TEDAPI';
@@ -2786,7 +2788,7 @@
                     // Handle both nested and flat response formats
                     const gw = status.gateway || status;
                     const isOnline = status.online ?? false;
-                    const mode = gw.fleetapi ? 'FleetAPI' : gw.cloud_mode ? 'Cloud' : gw.rsa_key_configured ? 'TEDAPI v1r' : 'TEDAPI';
+                    const mode = gw.fleetapi ? 'FleetAPI' : gw.cloud_mode ? 'Cloud' : gw.basic_lan ? 'Basic LAN' : gw.rsa_key_configured ? 'TEDAPI v1r' : 'TEDAPI';
                     const hostInfo = (gw.cloud_mode || gw.fleetapi)
                         ? (gw.site_id || gw.email || id)
                         : (gw.host || id);
@@ -2837,6 +2839,7 @@
                             name: s.gateway?.name || id,
                             type: s.gateway?.type || 'powerwall',
                             rsa_key_configured: s.gateway?.rsa_key_configured || false,
+                            basic_lan: s.gateway?.basic_lan || false,
                             // pw3 is a system-wide flag; attach to every gateway entry
                             pw3: window._systemPw3 || false,
                         }])

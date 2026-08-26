@@ -209,3 +209,34 @@ async def test_tedapi_gateway_still_fetches_optional_data(
     mock_pypowerwall.get_mode.assert_called()
     assert data.vitals is not None
     assert data.mode == "self_consumption"
+
+
+@pytest.mark.asyncio
+async def test_stats_reports_basic_lan_mode(monkeypatch):
+    """/stats must expose basiclan=True (and tedapi=False) for Basic LAN gateways.
+
+    Regression: the Console connect-mode card showed "TEDAPI" for Basic LAN
+    because /stats set tedapi=True for any gateway with a host (discussion #79).
+    """
+    import pypowerwall
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    mock_pw = _make_basic_lan_pw_mock()
+    monkeypatch.setattr(pypowerwall, "Powerwall", lambda **kw: mock_pw)
+
+    configs = [
+        GatewayConfig(id="pw3", name="PW3", host="10.42.1.44", password="12345")
+    ]
+    await gateway_manager.initialize(configs, poll_interval=5)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["basiclan"] is True
+        assert data["tedapi"] is False
+
+    await gateway_manager.shutdown()
