@@ -15,10 +15,12 @@ class Gateway(BaseModel):
         - Example: Gateway(id="home", host="192.168.91.1", gw_pwd="password")
 
     Basic LAN Mode (Powerwall 3):
-        - Requires: host, password
+        - Requires: host + customer password (supplied via gateway config /
+          PW_PASSWORD; not stored on this model)
         - Core metrics (power flows, battery SoC, grid status) over the
           Powerwall's wired LAN interface - no RSA key or gateway password
-        - Example: Gateway(id="pw3", host="10.42.1.44", password="XXXXX")
+        - Example: Gateway(id="pw3", host="10.42.1.44", basic_lan=True)
+          (password is provided via GatewayConfig(password=...) / PW_PASSWORD)
 
     Cloud Mode:
         - Requires: email, cloud_mode=True

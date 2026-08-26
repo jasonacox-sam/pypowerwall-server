@@ -1007,8 +1007,9 @@ class GatewayManager:
                             )
                             connected = grid_probe is not None
                         if not connected:
+                            mode_hint = "Basic LAN" if self.gateways[gateway_id].basic_lan else "TEDAPI mode"
                             raise Exception(
-                                f"pypowerwall failed to connect to gateway {gateway_id} (TEDAPI mode)"
+                                f"pypowerwall failed to connect to gateway {gateway_id} ({mode_hint})"
                             )
 
                     self.connections[gateway_id] = pw
