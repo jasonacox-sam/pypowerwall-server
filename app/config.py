@@ -82,7 +82,9 @@ Environment Variables (Proxy Compatible):
         PW_TIMESERIES_DAILY_RETENTION - Daily kWh aggregate retention (default: "0" =
                                         unlimited; one tiny row per gateway per day)
         PW_TIMESERIES_PATH            - SQLite database path (default: /data/timeseries.db
-                                        when /data exists, else data/timeseries.db)
+                                        when /data exists, else data/timeseries.db).
+                                        If pointed at a directory instead of a file,
+                                        "timeseries.db" is appended automatically.
 
 Connection Modes:
 

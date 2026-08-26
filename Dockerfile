@@ -46,7 +46,8 @@ RUN apt-get update && \
 COPY app/ ./app/
 
 # Persistent data mount point for the time-series SQLite store
-# (PW_TIMESERIES_PATH defaults to /data/timeseries.db). Mount a volume
+# (PW_TIMESERIES_PATH defaults to /data/timeseries.db; if set to a
+# directory it will be resolved to <dir>/timeseries.db). Mount a volume
 # here to keep daily energy history across container rebuilds:
 #   docker run ... -v pws-data:/data ...
 RUN mkdir -p /data
