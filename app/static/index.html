@@ -292,6 +292,17 @@
             cursor: pointer;
             user-select: none;
             transition: opacity 0.15s ease;
+            /* button reset — keys are <button> for keyboard access, styled as plain text */
+            border: 0;
+            background: none;
+            padding: 0;
+            font: inherit;
+            color: inherit;
+        }
+        .energy-trend-legend .key:focus-visible {
+            outline: 1px solid #58a6ff;
+            outline-offset: 2px;
+            border-radius: 3px;
         }
         .energy-trend-legend .key.off {
             opacity: 0.35;
@@ -1254,11 +1265,11 @@
                         <button data-range="fit">Fit</button>
                     </div>
                     <div class="energy-trend-legend">
-                        <span class="key" data-series="solar_kw"><span class="swatch" style="background: var(--solar-color)"></span>Solar kW</span>
-                        <span class="key" data-series="home_kw"><span class="swatch" style="background: var(--home-color)"></span>Home kW</span>
-                        <span class="key" data-series="battery_kw"><span class="swatch" style="background: var(--battery-color)"></span>Battery kW</span>
-                        <span class="key" data-series="grid_kw"><span class="swatch" style="background: var(--grid-color)"></span>Grid kW</span>
-                        <span class="key" data-series="battery_level"><span class="swatch dashed"></span>Battery Level % <span style="color: var(--text-muted)">(right axis)</span></span>
+                        <button type="button" class="key" data-series="solar_kw"><span class="swatch" style="background: var(--solar-color)"></span>Solar kW</button>
+                        <button type="button" class="key" data-series="home_kw"><span class="swatch" style="background: var(--home-color)"></span>Home kW</button>
+                        <button type="button" class="key" data-series="battery_kw"><span class="swatch" style="background: var(--battery-color)"></span>Battery kW</button>
+                        <button type="button" class="key" data-series="grid_kw"><span class="swatch" style="background: var(--grid-color)"></span>Grid kW</button>
+                        <button type="button" class="key" data-series="battery_level"><span class="swatch dashed"></span>Battery Level % <span style="color: var(--text-muted)">(right axis)</span></button>
                     </div>
                     <canvas id="energy-trend-chart"></canvas>
                     <div id="energy-trend-tooltip"></div>
@@ -2079,7 +2090,13 @@
             const W = canvas.width, H = canvas.height;
             ctx.clearRect(0, 0, W, H);
             const points = energyTrendPoints;
-            if (!points || points.length < 2 || W < 100) return;
+            if (!points || points.length < 2 || W < 100) {
+                // No drawable data — clear hover state so no stale tooltip lingers
+                energyTrendHoverPoint = null;
+                const staleTip = document.getElementById('energy-trend-tooltip');
+                if (staleTip) staleTip.style.display = 'none';
+                return;
+            }
 
             const padL = 48, padR = 44, padT = 12, padB = 24;
             const plotW = W - padL - padR, plotH = H - padT - padB;
