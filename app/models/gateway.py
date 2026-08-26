@@ -14,6 +14,12 @@ class Gateway(BaseModel):
         - Fastest, most reliable
         - Example: Gateway(id="home", host="192.168.91.1", gw_pwd="password")
 
+    Basic LAN Mode (Powerwall 3):
+        - Requires: host, password
+        - Core metrics (power flows, battery SoC, grid status) over the
+          Powerwall's wired LAN interface - no RSA key or gateway password
+        - Example: Gateway(id="pw3", host="10.42.1.44", password="XXXXX")
+
     Cloud Mode:
         - Requires: email, cloud_mode=True
         - Remote access from anywhere
@@ -31,6 +37,8 @@ class Gateway(BaseModel):
         port: Optional non-standard HTTPS port (e.g. 8443 when behind a travel router)
         gw_pwd: Gateway WiFi password for local access (TEDAPI mode only)
         email: Tesla account email (Cloud/FleetAPI modes)
+        basic_lan: True when connecting via PW3 Basic LAN (host + password,
+            no gw_pwd/RSA key); server skips endpoints this mode does not serve
         timezone: Local timezone for timestamp conversion
         cloud_mode: Enable Tesla Cloud API access
         fleetapi: Enable Tesla FleetAPI access
@@ -50,6 +58,7 @@ class Gateway(BaseModel):
     email: Optional[str] = Field(default=None, exclude=True)  # Tesla account email (internal only; never serialized in API responses)
     site_id: Optional[str] = None  # Tesla Site ID (populated after connection)
     timezone: str = "America/Los_Angeles"
+    basic_lan: bool = False  # PW3 Basic LAN mode (host + password, no gw_pwd/RSA)
     cloud_mode: bool = False
     fleetapi: bool = False
     type: str = "powerwall"  # "powerwall" | "inverter" (solar-only, no batteries)
