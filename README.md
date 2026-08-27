@@ -37,6 +37,20 @@ The **Energy** panel toggles between **Energy Summary** (current kW totals) and 
 
 The easiest way to get started is using the provided Docker image. You can run in either TEDAPI Mode (local access) or Cloud Mode (remote access). Select the appropriate option below:
 
+#### Choosing a Connection Mode
+
+Not sure which mode to run? Pick the row that matches your setup — then follow its example below:
+
+| Mode | Use when | Required settings | Data | Control |
+|------|----------|-------------------|------|---------|
+| **TEDAPI** *(default)* | You can reach the gateway from your local network (`192.168.91.1`) | `PW_HOST` + `PW_GW_PWD` | Full local metrics — power flows, vitals, strings, per-Powerwall detail | Add `PW_EMAIL` + `PW_AUTH_PATH` for hybrid cloud control |
+| **TEDAPI v1r** | Same, but connecting over wired LAN with a registered RSA key | `PW_HOST` + `PW_GW_PWD` + `PW_RSA_KEY_PATH` (add `PW_WIFI_HOST` for follower Powerwall data) | Full local metrics | Add `PW_EMAIL` + `PW_AUTH_PATH` for hybrid cloud control |
+| **Basic LAN** *(Powerwall 3)* | PW3 reachable on its wired vendor subnet — no gateway password or RSA key needed | `PW_HOST` + `PW_PASSWORD` (customer password = last 5 chars of the gateway password) | Core metrics only — power flows, battery SoC, grid status | Not available in this mode |
+| **Cloud** | No local network access to the system | `PW_EMAIL` + `PW_AUTH_PATH` (one-time `python -m pypowerwall setup`) | Standard cloud metrics | Yes |
+| **FleetAPI** | Remote access via Tesla's official Fleet API | `PW_GATEWAYS` (or `gateways.yaml`) entry with `email` + `authpath` + `fleetapi: true` | Standard cloud metrics | Yes |
+
+All local modes are read-only unless cloud credentials are provided (hybrid mode).
+
 #### TEDAPI Mode (Local Access)
 ```bash
 # TEDAPI Mode requires host network to access gateway at 192.168.91.1
