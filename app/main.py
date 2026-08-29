@@ -54,12 +54,13 @@ Routing Structure:
 """
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response, Header
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from typing import Optional
@@ -210,6 +211,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Rate limiting: fixed-window request throttle applied to every endpoint
+# (including /control/* and /api/*) to prevent request flooding/DoS.
+_RATE_LIMIT_MAX_REQUESTS = 120  # requests
+_RATE_LIMIT_WINDOW_SECONDS = 60  # per client IP, per window
+_rate_limit_buckets: dict = {}
+
+
+class _RateLimitMiddleware:
+    """Pure ASGI middleware: simple fixed-window rate limiter per client IP."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        client = scope.get("client")
+        client_ip = client[0] if client else "unknown"
+        now = time.monotonic()
+        window_start, count = _rate_limit_buckets.get(client_ip, (now, 0))
+        if now - window_start >= _RATE_LIMIT_WINDOW_SECONDS:
+            window_start, count = now, 0
+        count += 1
+        _rate_limit_buckets[client_ip] = (window_start, count)
+        if count > _RATE_LIMIT_MAX_REQUESTS:
+            response = JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_RateLimitMiddleware)
 
 
 # Cookie max-age for powerflow web app auth compatibility (issue #7)
