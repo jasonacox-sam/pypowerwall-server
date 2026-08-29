@@ -2,6 +2,14 @@
 
 ## Version History
 
+### [0.6.0] - Upcoming
+
+**Added:**
+- **Powerwall 3 Basic LAN support (`PW_HOST` + `PW_PASSWORD`)** — you can now connect a PW3 gateway using only its local address and Basic password (the one printed on the gateway QR card / in the Tesla app), with no Tesla cloud credentials and no `PW_EMAIL`/`PW_TOKEN`. Uses the gateway's local TEDAPI via the pypowerwall library's Basic auth mode; poll-only (no cloud control), consistent with local v1r connections. Connection mode is reported in the Console gateway card.
+- **`PW_TIMESERIES_PATH` usability** — if the configured path is a directory, the default timeseries database filename is appended automatically instead of failing to open.
+- **Trend panel legend toggle + hover tooltip** — click the legend to show/hide each series (Solar/Home/Battery/Grid/Battery Level); hovering the chart shows a tooltip with values at the cursor. Legend keys are keyboard-accessible, and the tooltip clears when there is no data. (#81)
+- **README updates** — clarified Energy panel functionality, refreshed console/trend screenshots, and documented the connection mode selection options.
+
 ### [0.5.0] - 2026-08-23
 
 **Added:**
