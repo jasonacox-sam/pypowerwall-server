@@ -34,7 +34,9 @@ Environment Variables (Proxy Compatible):
     Core Connection Settings:
         PW_HOST              - Powerwall IP address (default: none, e.g., 192.168.91.1)
         PW_GW_PWD            - Gateway WiFi password for TEDAPI (default: none)
-        PW_PASSWORD          - Legacy PW2 local password (default: none)
+        PW_PASSWORD          - Customer password for local API access - PW2 local
+                               mode or PW3 Basic LAN mode, typically the last 5
+                               characters of the gateway password (default: none)
         PW_EMAIL             - Tesla account email for cloud mode (default: none)
         PW_TIMEZONE          - Local timezone (default: "America/Los_Angeles")
         PW_AUTH_PATH         - Path to auth token files (default: none)
@@ -80,7 +82,9 @@ Environment Variables (Proxy Compatible):
         PW_TIMESERIES_DAILY_RETENTION - Daily kWh aggregate retention (default: "0" =
                                         unlimited; one tiny row per gateway per day)
         PW_TIMESERIES_PATH            - SQLite database path (default: /data/timeseries.db
-                                        when /data exists, else data/timeseries.db)
+                                        when /data exists, else data/timeseries.db).
+                                        If pointed at a directory instead of a file,
+                                        "timeseries.db" is appended automatically.
 
 Connection Modes:
 
@@ -189,7 +193,7 @@ from pydantic_settings import BaseSettings
 logger = logging.getLogger(__name__)
 
 # Server version
-SERVER_VERSION = "0.5.0"
+SERVER_VERSION = "0.6.0"
 
 
 class GatewayConfig(BaseModel):
@@ -197,6 +201,7 @@ class GatewayConfig(BaseModel):
 
     Auth modes:
     - TEDAPI: host + gw_pwd (local gateway access via 192.168.91.1)
+    - Basic LAN: host + password (PW3 wired LAN core metrics, no RSA key needed)
     - Cloud: email + authpath (uses .pypowerwall.auth and .pypowerwall.site files)
 
     NOTE: Deliberately a plain BaseModel, not BaseSettings — it is only ever
@@ -213,6 +218,7 @@ class GatewayConfig(BaseModel):
         default=None, ge=1, le=65535
     )  # Non-standard HTTPS port (e.g. 8443 via travel router)
     gw_pwd: Optional[str] = None  # Gateway Wi-Fi password for TEDAPI mode
+    password: Optional[str] = None  # Customer password for local API (PW3 Basic LAN / PW2 local)
     rsa_key_path: Optional[str] = (
         None  # Path to RSA-4096 private key PEM for v1r LAN TEDAPI access
     )
@@ -506,6 +512,7 @@ class Settings(BaseSettings):
                     name="Default Gateway",
                     host=self.pw_host,
                     gw_pwd=self.pw_gw_pwd,
+                    password=self.pw_password,
                     rsa_key_path=self.pw_rsa_key_path,
                     wifi_host=self.pw_wifi_host,
                     email=self.pw_email,

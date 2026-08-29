@@ -1915,6 +1915,7 @@ async def get_stats():
     cloudmode = False
     fleetapi = False
     tedapi = False
+    basiclan = False
     pw3 = False
     tedapi_mode = None
     siteid = None
@@ -1929,8 +1930,10 @@ async def get_stats():
             fleetapi = True
         if gw.cloud_mode:
             cloudmode = True
-        if gw.host:
+        if gw.host and not gw.basic_lan:
             tedapi = True
+        if gw.basic_lan:
+            basiclan = True
 
         # Get site ID if available
         if gw.site_id:
@@ -2042,6 +2045,7 @@ async def get_stats():
         "cloudmode": cloudmode,
         "fleetapi": fleetapi,
         "tedapi": tedapi,
+        "basiclan": basiclan,
         "pw3": pw3,
         "tedapi_mode": tedapi_mode,
         "siteid": siteid,

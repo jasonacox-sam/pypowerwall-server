@@ -18,7 +18,7 @@ The **Energy** panel toggles between **Energy Summary** (current kW totals) and 
 ## Features
 
 - **Multi-Gateway Support** - Monitor multiple Powerwall installations from a single server with per-gateway configuration and aggregated metrics
-- **Connection Modes** - TEDAPI (local), Cloud Mode (remote), and FleetAPI support with automatic failover and graceful degradation
+- **Connection Modes** - TEDAPI (local), Basic LAN (PW3 wired LAN, core metrics), Cloud Mode (remote), and FleetAPI support with automatic failover and graceful degradation
 - **Real-Time Updates** - WebSocket streaming with 1-second updates and background polling with intelligent caching
 - **Complete API** - Full backward compatibility with pypowerwall proxy plus new multi-gateway and aggregate endpoints
 - **Console Web UI** - Tesla Power Flow animation, management console, and auto-generated API documentation at /docs
@@ -29,12 +29,27 @@ The **Energy** panel toggles between **Energy Summary** (current kW totals) and 
 ### Requirements
 
 * TEDAPI Mode: For extended metrics you will need the Powerwall/Gateway Password (typically found on the QR sticker - behind front panel of PW3 - see [picture](https://github.com/user-attachments/assets/6cf11830-fa70-4ebb-9be7-7d0a5e2db4dc)). And you computer must be connected to the Powerwall WiFi Access point (it will be IP address 192.168.91.1)
+* Basic LAN Mode (PW3): For core metrics over a wired connection, you only need the customer password (last 5 characters of the gateway password) and the Powerwall's wired LAN IP on the vendor subnet (e.g. `10.42.1.x`). See [Basic LAN Mode](#basic-lan-mode-powerwall-3-no-gateway-password-or-rsa-key) below.
 * Cloud Mode: For basic metrics, you will need your Tesla customer login credentials (email) and will need to run the cloud mode one-time setup below.
 
 
 ### Docker (Recommended)
 
 The easiest way to get started is using the provided Docker image. You can run in either TEDAPI Mode (local access) or Cloud Mode (remote access). Select the appropriate option below:
+
+#### Choosing a Connection Mode
+
+Not sure which mode to run? Pick the row that matches your setup — then follow its example below:
+
+| Mode | Use when | Required settings | Data | Control |
+|------|----------|-------------------|------|---------|
+| **TEDAPI** *(default)* | You can reach the gateway from your local network (`192.168.91.1`) | `PW_HOST` + `PW_GW_PWD` | Full local metrics — power flows, vitals, strings, per-Powerwall detail | Add `PW_EMAIL` + `PW_AUTH_PATH` for hybrid cloud control |
+| **TEDAPI v1r** | Same, but connecting over wired LAN with a registered RSA key | `PW_HOST` + `PW_GW_PWD` + `PW_RSA_KEY_PATH` (add `PW_WIFI_HOST` for follower Powerwall data) | Full local metrics | Add `PW_EMAIL` + `PW_AUTH_PATH` for hybrid cloud control |
+| **Basic LAN** *(Powerwall 3)* | PW3 reachable on its wired vendor subnet — no gateway password or RSA key needed | `PW_HOST` + `PW_PASSWORD` (customer password = last 5 chars of the gateway password) | Core metrics only — power flows, battery SoC, grid status | Not available in this mode |
+| **Cloud** | No local network access to the system | `PW_EMAIL` + `PW_AUTH_PATH` (one-time `python -m pypowerwall setup`) | Standard cloud metrics | Yes |
+| **FleetAPI** | Remote access via Tesla's official Fleet API | `PW_GATEWAYS` (or `gateways.yaml`) entry with `email` + `authpath` + `fleetapi: true` | Standard cloud metrics | Yes |
+
+All local modes are read-only unless cloud credentials are provided (hybrid mode).
 
 #### TEDAPI Mode (Local Access)
 ```bash
@@ -68,6 +83,25 @@ docker run -d \
 > **Note:** `PW_WIFI_HOST` is the IP address pypowerwall uses for the WiFi fallback path in v1r mode. It defaults to `192.168.91.1`. Only set it if your gateway is on a different IP (e.g. behind a travel router).
 >
 > **Note:** The `-v pws-data:/data` mount persists the daily energy history (SQLite time-series store) across container upgrades. Omit it if you run with `PW_TIMESERIES_RETENTION=-1` (subsystem disabled).
+
+#### Basic LAN Mode (Powerwall 3, No Gateway Password or RSA Key)
+
+Powerwall 3 units expose a small set of local API endpoints over their wired LAN interface (vendor subnet, e.g. `10.42.1.x`). With just the customer password (the last 5 characters of the gateway password), you can monitor core metrics without the gateway Wi-Fi password, an RSA key, or any cloud setup:
+
+```bash
+# Basic LAN Mode - connect directly to the Powerwall 3 over Ethernet
+# PW_HOST is the Powerwall's wired LAN IP on the vendor subnet
+# PW_PASSWORD is the customer password (last 5 chars of the gateway password)
+docker run -d \
+  --name pypowerwall-server \
+  --network host \
+  -e PW_HOST=10.42.1.44 \
+  -e PW_PASSWORD=your_customer_password \
+  -v pws-data:/data \
+  jasonacox/pypowerwall-server
+```
+
+This mode serves power flows (`/api/meters/aggregates`), battery state of charge (`/api/system_status/soe`), and grid status (`/api/system_status/grid_status`). Most other local `/api/*` endpoints (vitals, strings, operation, firmware info, etc.) return 404 in this mode, so pypowerwall-server skips them automatically to keep the logs clean. Monitoring is read-only and limited to the core metrics — for full device-level data use TEDAPI mode above. Requires `pypowerwall` 0.17.0+.
 
 #### Cloud Mode (Remote Access)
 

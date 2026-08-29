@@ -52,7 +52,10 @@ Environment Variables:
     PW_TIMESERIES_PATH            SQLite file path (default "/data/timeseries.db"
                                   when /data exists — e.g. the Docker image —
                                   otherwise "data/timeseries.db" relative to
-                                  the working directory).
+                                  the working directory). If set to a
+                                  directory instead of a file (trailing "/"
+                                  or an existing directory), "timeseries.db"
+                                  is appended automatically.
 """
 
 import asyncio
@@ -180,6 +183,8 @@ def _midnights_between(t0: float, t1: float, zone: ZoneInfo) -> List[float]:
 class TimeSeriesStore:
     """Thread-safe SQLite time-series store for daily energy statistics."""
 
+    _DEFAULT_FILENAME = "timeseries.db"
+
     def __init__(
         self,
         db_path: str,
@@ -189,13 +194,18 @@ class TimeSeriesStore:
         """Create the store.
 
         Args:
-            db_path:         SQLite database file path.
+            db_path:         SQLite database file path. If this points at a
+                             directory (trailing slash, or an existing
+                             directory on disk) rather than a file, the
+                             default filename ("timeseries.db") is appended
+                             automatically — a common misconfiguration when
+                             PW_TIMESERIES_PATH is set to a mounted volume.
             retention:       Raw sample retention (duration string or seconds).
                              -1 disables the store, 0 means unlimited.
             daily_retention: Daily aggregate retention (duration string or
                              seconds). 0 means unlimited.
         """
-        self._db_path = str(db_path)
+        self._db_path = self._resolve_db_path(str(db_path))
         self._retention = self._coerce(retention, "24h", "PW_TIMESERIES_RETENTION")
         self._daily_retention = self._coerce(
             daily_retention, "0", "PW_TIMESERIES_DAILY_RETENTION"
@@ -215,6 +225,21 @@ class TimeSeriesStore:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @classmethod
+    def _resolve_db_path(cls, db_path: str) -> str:
+        """Append the default filename when db_path looks like a directory.
+
+        Guards against pointing PW_TIMESERIES_PATH at a directory (e.g. a
+        mounted volume such as "/data") instead of a file — SQLite cannot
+        open a directory as a database. The ":memory:" sentinel is passed
+        through untouched.
+        """
+        if db_path == ":memory:":
+            return db_path
+        if db_path.endswith(("/", os.sep)) or os.path.isdir(db_path):
+            return os.path.join(db_path, cls._DEFAULT_FILENAME)
+        return db_path
 
     @staticmethod
     def _coerce(value: Any, default: str, setting: str) -> int:

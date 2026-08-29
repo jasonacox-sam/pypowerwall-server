@@ -315,13 +315,25 @@ class GatewayManager:
             try:
                 # Validate configuration
                 # TEDAPI mode: need host + (gw_pwd OR rsa_key_path)
+                # Basic LAN mode (PW3): host + password only - pypowerwall's
+                #   local client serves core metrics via /api/login/Basic
                 # Cloud mode: need email (authpath is optional, pypowerwall has defaults)
-                has_tedapi = config.host and (config.gw_pwd or config.rsa_key_path)
+                basic_lan = bool(
+                    config.host
+                    and (config.password or settings.pw_password)
+                    and not (config.gw_pwd or config.rsa_key_path)
+                )
+                has_local = config.host and (
+                    config.gw_pwd
+                    or config.rsa_key_path
+                    or config.password
+                    or settings.pw_password
+                )
                 has_cloud = config.email  # cloud_mode is auto-set, email is sufficient
 
-                if not (has_tedapi or has_cloud):
+                if not (has_local or has_cloud):
                     logger.error(
-                        f"Invalid configuration for gateway {config.id}: need host+gw_pwd or host+rsa_key_path (TEDAPI) or email (Cloud)"
+                        f"Invalid configuration for gateway {config.id}: need host+gw_pwd or host+rsa_key_path (TEDAPI), host+password (Basic LAN), or email (Cloud)"
                     )
                     continue
 
@@ -356,6 +368,7 @@ class GatewayManager:
                     wifi_host=config.wifi_host,
                     email=config.email,
                     timezone=config.timezone,
+                    basic_lan=basic_lan,
                     cloud_mode=config.cloud_mode,
                     fleetapi=config.fleetapi,
                     type=config.type,
@@ -378,6 +391,8 @@ class GatewayManager:
                     mode = "FleetAPI"
                 elif config.cloud_mode:
                     mode = "Cloud"
+                elif basic_lan:
+                    mode = "Basic LAN"
                 else:
                     mode = "TEDAPI"
 
@@ -591,6 +606,14 @@ class GatewayManager:
         step_timeout = max(5.0, settings.timeout + 2.0)
         long_timeout = max(10.0, settings.timeout + 2.0)
 
+        # PW3 Basic LAN (host + password) exposes a limited local API:
+        # /api/meters/aggregates, /api/system_status/soe and
+        # /api/system_status/grid_status. Most other /api/* endpoints return
+        # 404 on the wired LAN interface, so skip the fetches below in that
+        # mode - avoids per-cycle 404 log noise and wasted request timeouts.
+        gateway = self.gateways.get(gateway_id)
+        basic_lan = bool(gateway.basic_lan) if gateway else False
+
         # Run blocking pypowerwall calls in dedicated executor with timeout protection
         loop = asyncio.get_running_loop()
 
@@ -641,19 +664,20 @@ class GatewayManager:
         )
 
         # Try to get optional vitals and strings (don't fail if these aren't available)
-        try:
-            data.vitals = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.vitals), timeout=long_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Vitals not available for {gateway_id}: {e}")
+        if not basic_lan:
+            try:
+                data.vitals = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.vitals), timeout=long_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Vitals not available for {gateway_id}: {e}")
 
-        try:
-            data.strings = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.strings), timeout=long_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Strings not available for {gateway_id}: {e}")
+            try:
+                data.strings = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.strings), timeout=long_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Strings not available for {gateway_id}: {e}")
 
         # Try to get additional data
         try:
@@ -664,66 +688,68 @@ class GatewayManager:
         except (asyncio.TimeoutError, Exception) as e:
             logger.debug(f"SOE not available for {gateway_id}: {e}")
 
-        try:
-            data.freq = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.freq), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Frequency not available for {gateway_id}: {e}")
+        if not basic_lan:
+            try:
+                data.freq = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.freq), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Frequency not available for {gateway_id}: {e}")
 
-        try:
-            data.status = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.status), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Status not available for {gateway_id}: {e}")
+            try:
+                data.status = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.status), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Status not available for {gateway_id}: {e}")
 
-        try:
-            data.version = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.version), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Version not available for {gateway_id}: {e}")
+            try:
+                data.version = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.version), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Version not available for {gateway_id}: {e}")
 
-        try:
-            data.din = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.din), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"DIN not available for {gateway_id}: {e}")
+            try:
+                data.din = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.din), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"DIN not available for {gateway_id}: {e}")
 
-        try:
-            data.uptime = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.uptime), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Uptime not available for {gateway_id}: {e}")
+            try:
+                data.uptime = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.uptime), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Uptime not available for {gateway_id}: {e}")
 
         logger.debug(f"Gateway {gateway_id} aggregates: {data.aggregates}")
 
-        # Try to get alerts (for caching)
-        try:
-            data.alerts = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.alerts), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Alerts not available for {gateway_id}: {e}")
+        if not basic_lan:
+            # Try to get alerts (for caching)
+            try:
+                data.alerts = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.alerts), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Alerts not available for {gateway_id}: {e}")
 
-        # Try to get temps (for caching)
-        try:
-            data.temps = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.temps), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Temps not available for {gateway_id}: {e}")
+            # Try to get temps (for caching)
+            try:
+                data.temps = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.temps), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Temps not available for {gateway_id}: {e}")
 
-        # Try to get site name (for caching)
-        try:
-            data.site_name = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.site_name), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Site name not available for {gateway_id}: {e}")
+            # Try to get site name (for caching)
+            try:
+                data.site_name = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.site_name), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Site name not available for {gateway_id}: {e}")
 
         # Detect PW3 status from pypowerwall TEDAPI connection
         try:
@@ -783,36 +809,37 @@ class GatewayManager:
         last_data = self._last_successful_data.get(gateway_id)
         if last_data and last_data.mode:
             data.mode = last_data.mode
-        try:
-            data.mode = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.get_mode),
-                timeout=step_timeout,
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Operation mode not available for {gateway_id}: {e}")
+        if not basic_lan:
+            try:
+                data.mode = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.get_mode),
+                    timeout=step_timeout,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Operation mode not available for {gateway_id}: {e}")
 
-        # Try to get reserve and time remaining (for caching)
-        try:
-            # Request the Tesla App scaled reserve setting (scale=True)
-            data.reserve = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, lambda: pw.get_reserve(scale=True)), timeout=step_timeout
-            )
-            data.time_remaining = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.get_time_remaining),
-                timeout=step_timeout,
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(
-                f"Reserve/time remaining not available for {gateway_id}: {e}"
-            )
+            # Try to get reserve and time remaining (for caching)
+            try:
+                # Request the Tesla App scaled reserve setting (scale=True)
+                data.reserve = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, lambda: pw.get_reserve(scale=True)), timeout=step_timeout
+                )
+                data.time_remaining = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.get_time_remaining),
+                    timeout=step_timeout,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(
+                    f"Reserve/time remaining not available for {gateway_id}: {e}"
+                )
 
-        # Try to get system status for /pod endpoint (for caching)
-        try:
-            data.system_status = await asyncio.wait_for(
-                loop.run_in_executor(self._executor, pw.system_status), timeout=step_timeout
-            )
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"System status not available for {gateway_id}: {e}")
+            # Try to get system status for /pod endpoint (for caching)
+            try:
+                data.system_status = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, pw.system_status), timeout=step_timeout
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"System status not available for {gateway_id}: {e}")
 
         # Try to get fan speeds for /fans endpoint (TEDAPI only)
         # get_fan_speeds() lives on the TEDAPI client (pw.tedapi),
@@ -826,41 +853,42 @@ class GatewayManager:
         except (asyncio.TimeoutError, Exception) as e:
             logger.debug(f"Fan speeds not available for {gateway_id}: {e}")
 
-        # Try to get networks for /api/system/networks endpoint
-        try:
-            networks_result = await asyncio.wait_for(
-                loop.run_in_executor(
-                    self._executor, lambda: pw.poll("/api/networks")
-                ),
-                timeout=step_timeout,
-            )
-            if networks_result and isinstance(networks_result, list):
-                data.networks = networks_result
-            elif networks_result and isinstance(networks_result, str):
-                try:
-                    data.networks = json.loads(networks_result)
-                except json.JSONDecodeError:
-                    pass
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Networks not available for {gateway_id}: {e}")
+        if not basic_lan:
+            # Try to get networks for /api/system/networks endpoint
+            try:
+                networks_result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self._executor, lambda: pw.poll("/api/networks")
+                    ),
+                    timeout=step_timeout,
+                )
+                if networks_result and isinstance(networks_result, list):
+                    data.networks = networks_result
+                elif networks_result and isinstance(networks_result, str):
+                    try:
+                        data.networks = json.loads(networks_result)
+                    except json.JSONDecodeError:
+                        pass
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Networks not available for {gateway_id}: {e}")
 
-        # Try to get powerwalls for /api/powerwalls endpoint
-        try:
-            powerwalls_result = await asyncio.wait_for(
-                loop.run_in_executor(
-                    self._executor, lambda: pw.poll("/api/powerwalls")
-                ),
-                timeout=step_timeout,
-            )
-            if powerwalls_result and isinstance(powerwalls_result, dict):
-                data.powerwalls = powerwalls_result
-            elif powerwalls_result and isinstance(powerwalls_result, str):
-                try:
-                    data.powerwalls = json.loads(powerwalls_result)
-                except json.JSONDecodeError:
-                    pass
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.debug(f"Powerwalls not available for {gateway_id}: {e}")
+            # Try to get powerwalls for /api/powerwalls endpoint
+            try:
+                powerwalls_result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self._executor, lambda: pw.poll("/api/powerwalls")
+                    ),
+                    timeout=step_timeout,
+                )
+                if powerwalls_result and isinstance(powerwalls_result, dict):
+                    data.powerwalls = powerwalls_result
+                elif powerwalls_result and isinstance(powerwalls_result, str):
+                    try:
+                        data.powerwalls = json.loads(powerwalls_result)
+                    except json.JSONDecodeError:
+                        pass
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Powerwalls not available for {gateway_id}: {e}")
 
         # Guard against partial TEDAPI follower snapshots replacing a complete
         # multi-Powerwall view for a single poll cycle.
@@ -937,8 +965,13 @@ class GatewayManager:
                             "poolmaxsize": settings.pool_maxsize,
                             "pwcacheexpire": pwcacheexpire,
                         }
-                        if settings.pw_password:
-                            tedapi_kwargs["password"] = settings.pw_password
+                        # Per-gateway password (PW_GATEWAYS/config file) or the
+                        # legacy PW_PASSWORD env var. Without gw_pwd/rsa_key this
+                        # selects pypowerwall's local client (PW3 Basic LAN /
+                        # PW2 local mode); alongside gw_pwd it selects hybrid.
+                        local_password = config.password or settings.pw_password
+                        if local_password:
+                            tedapi_kwargs["password"] = local_password
                         if config.email:
                             tedapi_kwargs["email"] = config.email
                         if config.authpath:
@@ -962,9 +995,21 @@ class GatewayManager:
                             loop.run_in_executor(self._executor, pw.is_connected),
                             timeout=10.0,
                         )
+                        if not connected and self.gateways[gateway_id].basic_lan:
+                            # PW3 Basic LAN does not expose /api/status, so
+                            # pypowerwall's is_connected() (which probes that
+                            # endpoint) reports a false negative even though
+                            # the Basic LAN endpoints are reachable. Probe an
+                            # endpoint this mode does serve instead.
+                            grid_probe = await asyncio.wait_for(
+                                loop.run_in_executor(self._executor, pw.grid_status),
+                                timeout=10.0,
+                            )
+                            connected = grid_probe is not None
                         if not connected:
+                            mode_hint = "Basic LAN" if self.gateways[gateway_id].basic_lan else "TEDAPI mode"
                             raise Exception(
-                                f"pypowerwall failed to connect to gateway {gateway_id} (TEDAPI mode)"
+                                f"pypowerwall failed to connect to gateway {gateway_id} ({mode_hint})"
                             )
 
                     self.connections[gateway_id] = pw
@@ -980,6 +1025,10 @@ class GatewayManager:
                         mode_label = "TEDAPI v1r + WiFi"
                     elif config.rsa_key_path:
                         mode_label = "TEDAPI v1r"
+                    elif config.gw_pwd:
+                        mode_label = "TEDAPI WiFi"
+                    elif gateway.basic_lan:
+                        mode_label = "Basic LAN"
                     else:
                         mode_label = "TEDAPI WiFi"
 
@@ -1005,6 +1054,16 @@ class GatewayManager:
                         logger.info(
                             f"Connected to gateway {gateway_id} - {mode_label} mode ({gateway.host})"
                         )
+                        if gateway.basic_lan:
+                            logger.info(
+                                "Gateway %s: Basic LAN mode serves a limited local "
+                                "API - skipping endpoints not exposed in this mode "
+                                "(vitals, strings, status, firmware, DIN, uptime, "
+                                "alerts, temps, site name, operation mode/reserve, "
+                                "system status, networks, powerwalls). Monitoring is "
+                                "limited to power flows, battery SoC and grid status.",
+                                gateway_id,
+                            )
 
                 except asyncio.TimeoutError:
                     logger.warning(

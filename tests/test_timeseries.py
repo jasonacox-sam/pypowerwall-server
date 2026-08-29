@@ -66,6 +66,32 @@ class TestParseDuration:
         assert store.enabled is False
 
 
+class TestResolveDbPath:
+    """PW_TIMESERIES_PATH may be misconfigured as a directory rather than a
+    file; the store should fall back to a default filename instead of
+    failing to open the SQLite connection."""
+
+    def test_memory_sentinel_untouched(self):
+        assert TimeSeriesStore._resolve_db_path(":memory:") == ":memory:"
+
+    def test_trailing_slash_appends_filename(self):
+        assert TimeSeriesStore._resolve_db_path("/data/") == "/data/timeseries.db"
+
+    def test_existing_directory_appends_filename(self, tmp_path):
+        # No trailing slash, but it's a real directory on disk.
+        assert TimeSeriesStore._resolve_db_path(str(tmp_path)) == str(
+            tmp_path / "timeseries.db"
+        )
+
+    def test_file_path_untouched(self, tmp_path):
+        target = str(tmp_path / "custom.db")
+        assert TimeSeriesStore._resolve_db_path(target) == target
+
+    def test_constructor_resolves_directory(self, tmp_path):
+        store = TimeSeriesStore(db_path=str(tmp_path))
+        assert store._db_path == str(tmp_path / "timeseries.db")
+
+
 # ---------------------------------------------------------------------------
 # Core recording + integration
 # ---------------------------------------------------------------------------
