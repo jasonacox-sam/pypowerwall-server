@@ -10,6 +10,9 @@
 - **Trend panel legend toggle + hover tooltip** — click the legend to show/hide each series (Solar/Home/Battery/Grid/Battery Level); hovering the chart shows a tooltip with values at the cursor. Legend keys are keyboard-accessible, and the tooltip clears when there is no data. (#81)
 - **README updates** — clarified Energy panel functionality, refreshed console/trend screenshots, and documented the connection mode selection options.
 
+**Fixed:**
+- **Local control writes in local-only mode (`v1r`/TEDAPI without cloud credentials)** — `POST /control/reserve`, `/control/mode`, and `/control/grid_charging` previously fell through to a raw `POST /api/mode` against the gateway's local API, which the gateway rejects — every write returned `{"ERROR":"Unknown API: /api/mode"}` while monitoring kept working. Local writes are now routed through the pypowerwall library's `set_reserve()` / `set_mode()` / `set_grid_charging()` / `set_operation()` methods (new `GatewayManager.local_control()`), using the same write-serialization and timeout protection as cloud control. Cloud/hybrid behavior is unchanged. Verified against live `v1r` hardware. (#82, #83)
+
 ### [0.5.0] - 2026-08-23
 
 **Added:**
