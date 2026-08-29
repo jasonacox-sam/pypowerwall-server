@@ -1693,6 +1693,72 @@ class GatewayManager:
             logger.warning(f"cloud_control({method}) error: {e}")
             return None
 
+    async def local_control(
+        self,
+        gateway_id: str,
+        method: str,
+        *args,
+        timeout: float = 10.0,
+        **kwargs,
+    ) -> Optional[Any]:
+        """Safely call a control method on a gateway's local pypowerwall connection.
+
+        Mirrors cloud_control() but targets the gateway's own local connection
+        (v1r/TEDAPI/Basic LAN), so mapped library methods like set_mode() and
+        set_reserve() work without any cloud credentials.
+
+        Args:
+            gateway_id: Gateway identifier
+            method: Method name on pypowerwall (e.g., 'set_mode', 'set_operation')
+            *args: Positional arguments for the method
+            timeout: Timeout in seconds (default: 10.0)
+            **kwargs: Keyword arguments for the method
+
+        Returns:
+            Result of the method call, or None on error/timeout
+        """
+        pw = self.connections.get(gateway_id)
+        if not pw:
+            logger.error(
+                f"local_control({method}): no local connection for {gateway_id}"
+            )
+            return None
+        try:
+            method_func = getattr(pw, method)
+            loop = asyncio.get_running_loop()
+            if method in _WRITE_METHODS:
+                async with self._write_lock:
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            self._executor, lambda: method_func(*args, **kwargs)
+                        ),
+                        timeout=timeout,
+                    )
+            else:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self._executor, lambda: method_func(*args, **kwargs)
+                    ),
+                    timeout=timeout,
+                )
+            logger.info(
+                f"[{gateway_id}] local_control({method}) completed successfully"
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[{gateway_id}] local_control({method}) timeout after {timeout}s"
+            )
+            return None
+        except AttributeError:
+            logger.error(
+                f"[{gateway_id}] local_control({method}): method not found"
+            )
+            return None
+        except Exception as e:
+            logger.warning(f"[{gateway_id}] local_control({method}) error: {e}")
+            return None
+
     async def call_tedapi(
         self,
         gateway_id: str,

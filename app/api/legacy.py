@@ -138,11 +138,12 @@ async def control_api(
                     detail="Control operation failed via cloud",
                 )
             return result
-        # Fallback for cloud-mode/FleetAPI gateways
+        # Fallback for local gateways (v1r / Basic LAN): use the library's
+        # set_operation() on the gateway's own local connection so the write
+        # is translated correctly instead of a raw POST the gateway rejects.
         gateway_id = get_default_gateway()
-        result = await gateway_manager.call_api(
-            gateway_id, "post", "/api/operation",
-            {"level": level, "mode": mode_val}, timeout=10.0
+        result = await gateway_manager.local_control(
+            gateway_id, "set_operation", level, mode_val, timeout=10.0
         )
         if result is None:
             raise HTTPException(
@@ -169,11 +170,11 @@ async def control_api(
                     detail="Control operation failed via cloud",
                 )
             return result
-        # Fallback for cloud-mode/FleetAPI gateways
+        # Fallback for local gateways (v1r / Basic LAN): set_operation() on
+        # the local connection rather than a raw POST to /api/operation.
         gateway_id = get_default_gateway()
-        result = await gateway_manager.call_api(
-            gateway_id, "post", "/api/operation",
-            {"level": level_val, "mode": mode}, timeout=10.0
+        result = await gateway_manager.local_control(
+            gateway_id, "set_operation", level_val, mode, timeout=10.0
         )
         if result is None:
             raise HTTPException(
@@ -182,25 +183,28 @@ async def control_api(
             )
         return result
 
-    # Map control paths to pypowerwall cloud control methods.
-    # Used for TEDAPI gateways with cloud credentials (hybrid mode).
-    cloud_control_map = {
+    # Map control paths to pypowerwall control methods. Used for both cloud
+    # control (TEDAPI gateways with cloud credentials, hybrid mode) and local
+    # control (v1r / Basic LAN gateways without cloud credentials).
+    control_map = {
         "reserve": ("set_reserve", lambda d: [d["value"]]),
         "mode": ("set_mode", lambda d: [d["value"]]),
         "grid_charging": ("set_grid_charging", lambda d: [d["value"]]),
     }
 
-    if path in cloud_control_map:
-        method, args_fn = cloud_control_map[path]
+    if path in control_map:
+        method, args_fn = control_map[path]
         if gateway_manager._cloud_control:
             result = await gateway_manager.cloud_control(
                 method, *args_fn(data), timeout=10.0
             )
         else:
-            # v1r local mode: no cloud credentials, fall back to direct post
+            # Local mode (v1r / Basic LAN): call the mapped library method on
+            # the gateway's own connection instead of a raw POST, which the
+            # gateway's local API rejects with "Unknown API".
             gateway_id = get_default_gateway()
-            result = await gateway_manager.call_api(
-                gateway_id, "post", f"/api/{path}", data, timeout=10.0
+            result = await gateway_manager.local_control(
+                gateway_id, method, *args_fn(data), timeout=10.0
             )
         if result is None:
             raise HTTPException(
