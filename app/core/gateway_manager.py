@@ -402,14 +402,23 @@ class GatewayManager:
             except Exception as e:
                 logger.error(f"Failed to initialize gateway {config.id}: {e}")
 
-        # Initialize cloud control connection for TEDAPI gateways with cloud credentials.
-        # This enables hybrid operation: local TEDAPI reads + cloud control writes.
+        # Initialize cloud control connection for local gateways (TEDAPI or
+        # Basic LAN) with cloud credentials. This enables hybrid operation:
+        # local reads + cloud control writes.
         # Runs as a background task so a slow/flaky Tesla cloud connection (up
         # to 15s) doesn't block server startup and container health checks.
         hybrid_configs = [
             config
             for config in gateway_configs
-            if config.host and config.gw_pwd and config.email and not config.cloud_mode
+            if config.host
+            and (
+                config.gw_pwd
+                or config.rsa_key_path
+                or config.password
+                or settings.pw_password
+            )
+            and config.email
+            and not config.cloud_mode
         ]
         if hybrid_configs:
             self._cloud_control_task = asyncio.create_task(
@@ -806,9 +815,38 @@ class GatewayManager:
         # must be polled on every cycle so that mode changes made in the Tesla app
         # are reflected promptly (fixes issue #14).
         # Pre-fill from last known good value so a transient failure doesn't wipe the cache.
+        # Skipped for Basic LAN: that mode has no local mode/reserve endpoint, so a
+        # pre-filled value would go stale forever (issue reported by nesys on #85 -
+        # Console kept showing a mode from a previous control write). Hybrid mode
+        # refreshes from the cloud control connection below instead.
         last_data = self._last_successful_data.get(gateway_id)
-        if last_data and last_data.mode:
+        if last_data and last_data.mode and not basic_lan:
             data.mode = last_data.mode
+        if basic_lan:
+            # Basic LAN local API does not expose operation mode/reserve. When a
+            # hybrid cloud-control connection is available, refresh mode/reserve
+            # from the cloud so the Console reflects the real system state.
+            if self._cloud_control:
+                try:
+                    cloud_mode = await self.cloud_control(
+                        "get_mode", timeout=step_timeout
+                    )
+                    if cloud_mode:
+                        data.mode = cloud_mode
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.debug(
+                        f"Operation mode not available via cloud control for {gateway_id}: {e}"
+                    )
+                try:
+                    cloud_reserve = await self.cloud_control(
+                        "get_reserve", timeout=step_timeout, scale=True
+                    )
+                    if cloud_reserve is not None:
+                        data.reserve = cloud_reserve
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.debug(
+                        f"Reserve not available via cloud control for {gateway_id}: {e}"
+                    )
         if not basic_lan:
             try:
                 data.mode = await asyncio.wait_for(
@@ -1646,10 +1684,11 @@ class GatewayManager:
     ) -> Optional[Any]:
         """Call a control method via the cloud connection.
 
-        TEDAPI (local gateway) doesn't support write operations. When cloud
-        credentials are configured alongside a TEDAPI gateway, a separate
-        cloud-mode pypowerwall connection is created for control operations
-        like set_reserve() and set_mode().
+        Local gateways (TEDAPI / v1r / Basic LAN) don't support write
+        operations on their local API. When cloud credentials are configured
+        alongside a local gateway, a separate cloud-mode pypowerwall
+        connection is created for control operations like set_reserve() and
+        set_mode().
 
         Args:
             method: Method name on pypowerwall (e.g., 'set_reserve', 'set_mode')
@@ -1681,7 +1720,13 @@ class GatewayManager:
                     ),
                     timeout=timeout,
                 )
-            logger.info(f"cloud_control({method}) completed successfully")
+            # Reads (get_mode/get_reserve polling, etc.) log at DEBUG so the
+            # hybrid poll loop doesn't flood INFO every cycle (nesys, PR #85);
+            # writes are rare and user-initiated, so they stay visible at INFO.
+            if method in _WRITE_METHODS:
+                logger.info(f"cloud_control({method}) completed successfully")
+            else:
+                logger.debug(f"cloud_control({method}) completed successfully")
             return result
         except asyncio.TimeoutError:
             logger.warning(f"cloud_control({method}) timeout after {timeout}s")
@@ -1741,9 +1786,16 @@ class GatewayManager:
                     ),
                     timeout=timeout,
                 )
-            logger.info(
-                f"[{gateway_id}] local_control({method}) completed successfully"
-            )
+            # Same read/write split as cloud_control(): polled reads stay
+            # quiet at DEBUG, writes remain INFO.
+            if method in _WRITE_METHODS:
+                logger.info(
+                    f"[{gateway_id}] local_control({method}) completed successfully"
+                )
+            else:
+                logger.debug(
+                    f"[{gateway_id}] local_control({method}) completed successfully"
+                )
             return result
         except asyncio.TimeoutError:
             logger.warning(

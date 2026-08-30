@@ -703,6 +703,45 @@ async def test_initialize_creates_cloud_control(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_initialize_creates_cloud_control_for_basic_lan(monkeypatch):
+    """Test that initialize() creates _cloud_control for Basic LAN+cloud config.
+
+    Hybrid Basic LAN: local reads via PW_HOST+PW_PASSWORD, control writes via
+    the cloud connection (discussion #79).
+    """
+    from app.config import GatewayConfig
+
+    mock_cloud = _make_realistic_pw_mock()
+
+    import pypowerwall
+    monkeypatch.setattr(pypowerwall, "Powerwall", lambda **kw: mock_cloud)
+
+    configs = [
+        GatewayConfig(
+            id="home",
+            name="Home Gateway",
+            host="10.42.1.51",
+            password="12345",
+            email="user@example.com",
+        )
+    ]
+
+    gm = gateway_manager
+    gm.gateways.clear()
+    gm.connections.clear()
+    gm.cache.clear()
+    gm._cloud_control = None
+
+    await gm.initialize(configs, poll_interval=5)
+
+    assert gm._cloud_control_task is not None
+    await gm._cloud_control_task
+    assert gm._cloud_control is not None
+
+    await gm.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_initialize_no_cloud_control_for_cloud_mode(monkeypatch):
     """Test that initialize() does NOT create _cloud_control for pure cloud-mode gateways."""
     from app.config import GatewayConfig

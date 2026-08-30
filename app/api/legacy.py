@@ -1226,7 +1226,13 @@ async def get_api_operation():
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)
 
-    real_mode = "self_consumption"  # Default mode
+    # No fabricated default: when the mode is genuinely unknown (plain Basic
+    # LAN has no local mode endpoint, or the hybrid cloud link is down),
+    # report null so consumers display "unavailable" instead of a made-up
+    # "self_consumption" (nesys, PR #85 — Console showed a mode the system
+    # was not in). Cached mode and system_status.default_real_mode remain
+    # the real fallbacks for gateways that can provide them.
+    real_mode = None
     backup_reserve_percent = 0.0
 
     if status and status.data:
@@ -1920,6 +1926,7 @@ async def get_stats():
     fleetapi = False
     tedapi = False
     basiclan = False
+    cloudcontrol = False
     pw3 = False
     tedapi_mode = None
     siteid = None
@@ -1971,6 +1978,12 @@ async def get_stats():
                 "backoff_seconds": backoff_remaining if failures > 0 else 0,
             }
         )
+
+    # Hybrid (local reads + cloud control) connection state. _cloud_control
+    # is created/assigned on the event loop by the background init task and
+    # only read here on the same loop, so no lock is needed (same access
+    # pattern as the poll loop).
+    cloudcontrol = gateway_manager._cloud_control is not None
 
     # Determine mode string
     if fleetapi:
@@ -2050,6 +2063,7 @@ async def get_stats():
         "fleetapi": fleetapi,
         "tedapi": tedapi,
         "basiclan": basiclan,
+        "cloudcontrol": cloudcontrol,
         "pw3": pw3,
         "tedapi_mode": tedapi_mode,
         "siteid": siteid,

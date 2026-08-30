@@ -649,14 +649,20 @@ def test_api_operation_falls_back_to_system_status_when_mode_not_cached(client, 
 
 
 def test_api_operation_defaults_when_neither_mode_available(client, connected_gateway):
-    """Test /api/operation returns default mode when neither cache nor system_status has a mode."""
+    """When no mode source exists (plain Basic LAN, hybrid cloud down), /api/operation
+    must report null — not a fabricated "self_consumption".
+
+    Regression (nesys, PR #85): the Console displayed "Self-Consumption" for a
+    system that was actually in autonomous, because a hard-coded default was
+    served whenever mode was unavailable.
+    """
     connected_gateway.data.mode = None
     connected_gateway.data.system_status = {}  # No default_real_mode key
 
     response = client.get("/api/operation")
     assert response.status_code == 200
     data = response.json()
-    assert data["real_mode"] == "self_consumption"  # Hard-coded default
+    assert data["real_mode"] is None  # unavailable, not fabricated
 
 
 # ---------------------------------------------------------------------------

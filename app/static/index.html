@@ -2341,7 +2341,8 @@
                 } else if (stats.cloudmode) {
                     mode = 'Cloud';
                 } else if (stats.basiclan) {
-                    mode = 'Basic LAN';
+                    // Hybrid = Basic LAN local reads + cloud control connection
+                    mode = stats.cloudcontrol ? 'Hybrid' : 'Basic LAN';
                 } else if (stats.tedapi) {
                     const hasRsaKey = Object.values(gatewayMeta).some(gw => gw.rsa_key_configured);
                     mode = hasRsaKey ? 'TEDAPI v1r' : 'TEDAPI';
