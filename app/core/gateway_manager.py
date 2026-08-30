@@ -1803,14 +1803,27 @@ class GatewayManager:
             self._cloud_last_success = time.time()
             return result
         except asyncio.TimeoutError:
-            logger.warning(f"cloud_control({method}) timeout after {timeout}s")
+            # Reads poll on a fixed cadence, so a cloud-link outage would
+            # otherwise flood WARNING every cycle; writes stay at WARNING
+            # because they are user-initiated (mirrors the success-path split).
+            if method in _WRITE_METHODS:
+                logger.warning(
+                    f"cloud_control({method}) timeout after {timeout}s"
+                )
+            else:
+                logger.debug(
+                    f"cloud_control({method}) timeout after {timeout}s"
+                )
             self._cloud_failures += 1
             return None
         except AttributeError:
             logger.error(f"cloud_control({method}): method not found")
             return None
         except Exception as e:
-            logger.warning(f"cloud_control({method}) error: {e}")
+            if method in _WRITE_METHODS:
+                logger.warning(f"cloud_control({method}) error: {e}")
+            else:
+                logger.debug(f"cloud_control({method}) error: {e}")
             self._cloud_failures += 1
             return None
 
