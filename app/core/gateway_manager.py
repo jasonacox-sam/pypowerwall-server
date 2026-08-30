@@ -402,14 +402,23 @@ class GatewayManager:
             except Exception as e:
                 logger.error(f"Failed to initialize gateway {config.id}: {e}")
 
-        # Initialize cloud control connection for TEDAPI gateways with cloud credentials.
-        # This enables hybrid operation: local TEDAPI reads + cloud control writes.
+        # Initialize cloud control connection for local gateways (TEDAPI or
+        # Basic LAN) with cloud credentials. This enables hybrid operation:
+        # local reads + cloud control writes.
         # Runs as a background task so a slow/flaky Tesla cloud connection (up
         # to 15s) doesn't block server startup and container health checks.
         hybrid_configs = [
             config
             for config in gateway_configs
-            if config.host and config.gw_pwd and config.email and not config.cloud_mode
+            if config.host
+            and (
+                config.gw_pwd
+                or config.rsa_key_path
+                or config.password
+                or settings.pw_password
+            )
+            and config.email
+            and not config.cloud_mode
         ]
         if hybrid_configs:
             self._cloud_control_task = asyncio.create_task(
@@ -1646,10 +1655,11 @@ class GatewayManager:
     ) -> Optional[Any]:
         """Call a control method via the cloud connection.
 
-        TEDAPI (local gateway) doesn't support write operations. When cloud
-        credentials are configured alongside a TEDAPI gateway, a separate
-        cloud-mode pypowerwall connection is created for control operations
-        like set_reserve() and set_mode().
+        Local gateways (TEDAPI / v1r / Basic LAN) don't support write
+        operations on their local API. When cloud credentials are configured
+        alongside a local gateway, a separate cloud-mode pypowerwall
+        connection is created for control operations like set_reserve() and
+        set_mode().
 
         Args:
             method: Method name on pypowerwall (e.g., 'set_reserve', 'set_mode')
