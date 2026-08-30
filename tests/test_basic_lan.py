@@ -232,6 +232,42 @@ async def test_basic_lan_hybrid_reads_mode_from_cloud(
 
 
 @pytest.mark.asyncio
+async def test_hybrid_poll_reads_do_not_flood_info_logs(
+    mock_gateway_manager, mock_pypowerwall, caplog
+):
+    """Hybrid poll-loop reads (get_mode/get_reserve) must log at DEBUG, not INFO.
+
+    Regression (nesys, PR #85): the cloud refresh added with hybrid mode
+    made cloud_control() succeed twice per poll cycle (~5s), and its INFO
+    "completed successfully" lines flooded the logs. Reads log at DEBUG;
+    user-initiated writes keep the INFO line.
+    """
+    import logging
+
+    mock_pypowerwall.tedapi = None
+
+    mock_cloud = Mock()
+    mock_cloud.get_mode.return_value = "autonomous"
+    mock_cloud.get_reserve.return_value = 12.0
+    mock_cloud.set_reserve.return_value = True
+    gateway_manager._cloud_control = mock_cloud
+
+    gw = Gateway(id="pw3-lognoise", name="PW3", host="10.42.1.44", basic_lan=True)
+    gateway_manager.gateways["pw3-lognoise"] = gw
+    gateway_manager.connections["pw3-lognoise"] = mock_pypowerwall
+
+    with caplog.at_level(logging.INFO):
+        await gateway_manager._fetch_gateway_data("pw3-lognoise", mock_pypowerwall)
+        assert "cloud_control(get_mode) completed" not in caplog.text
+        assert "cloud_control(get_reserve) completed" not in caplog.text
+
+    # Writes are user-initiated and rare - they stay visible at INFO
+    with caplog.at_level(logging.INFO):
+        await gateway_manager.cloud_control("set_reserve", 20)
+        assert "cloud_control(set_reserve) completed successfully" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_basic_lan_without_cloud_does_not_show_stale_mode(
     mock_gateway_manager, mock_pypowerwall
 ):

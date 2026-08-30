@@ -1720,7 +1720,13 @@ class GatewayManager:
                     ),
                     timeout=timeout,
                 )
-            logger.info(f"cloud_control({method}) completed successfully")
+            # Reads (get_mode/get_reserve polling, etc.) log at DEBUG so the
+            # hybrid poll loop doesn't flood INFO every cycle (nesys, PR #85);
+            # writes are rare and user-initiated, so they stay visible at INFO.
+            if method in _WRITE_METHODS:
+                logger.info(f"cloud_control({method}) completed successfully")
+            else:
+                logger.debug(f"cloud_control({method}) completed successfully")
             return result
         except asyncio.TimeoutError:
             logger.warning(f"cloud_control({method}) timeout after {timeout}s")
@@ -1780,9 +1786,16 @@ class GatewayManager:
                     ),
                     timeout=timeout,
                 )
-            logger.info(
-                f"[{gateway_id}] local_control({method}) completed successfully"
-            )
+            # Same read/write split as cloud_control(): polled reads stay
+            # quiet at DEBUG, writes remain INFO.
+            if method in _WRITE_METHODS:
+                logger.info(
+                    f"[{gateway_id}] local_control({method}) completed successfully"
+                )
+            else:
+                logger.debug(
+                    f"[{gateway_id}] local_control({method}) completed successfully"
+                )
             return result
         except asyncio.TimeoutError:
             logger.warning(
