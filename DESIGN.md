@@ -536,21 +536,13 @@ graph TD
 
 ### Critical Issues
 
-#### 1. ⚠️ No Rate Limiting on Control Endpoints
+#### 1. ✅ No Rate Limiting on Control Endpoints — Addressed
 
-**Location**: [app/api/legacy.py](app/api/legacy.py#L73-L87)
+**Location**: [app/api/legacy.py](app/api/legacy.py#L73-L87), [app/main.py](app/main.py) (`_RateLimitMiddleware`)
 
 **Issue**: The `/control/{path}` endpoint accepts any POST with valid auth token but has no rate limiting. A compromised token could flood the Powerwall with commands.
 
-**Recommendation**:
-```python
-from slowapi import Limiter
-limiter = Limiter(key_func=get_remote_address)
-
-@router.post("/control/{path:path}")
-@limiter.limit("10/minute")
-async def control_api(path: str, ...):
-```
+**Resolution**: A first-party, pure-ASGI, fixed-window rate limiter is available, applied globally (not just `/control/*`) rather than the originally-suggested `slowapi` route decorator. It is **disabled by default** (`PW_RATE_LIMIT_ENABLED`) so it never regresses the common Powerwall-Dashboard/Grafana/Home Assistant polling use case; when enabled, limits and bucket-count are configurable via `PW_RATE_LIMIT_MAX_REQUESTS`, `PW_RATE_LIMIT_WINDOW_SECONDS`, and `PW_RATE_LIMIT_MAX_BUCKETS` (the last bounding memory via pruning). See the README "Rate Limiting" section for configuration and caveats (reverse-proxy shared-IP buckets, and the recommendation to pair this with a real reverse-proxy rate limiter for internet-exposed deployments).
 
 #### 2. ⚠️ Import Statement Inside Function
 
@@ -692,7 +684,7 @@ pypowerwall-server is a well-structured FastAPI application with solid async arc
 
 | Priority | Area | Effort |
 |----------|------|--------|
-| High | Rate limiting on control endpoints | Low |
+| ~~High~~ Done | ~~Rate limiting on control endpoints~~ Available via `PW_RATE_LIMIT_ENABLED` (default off) | Low |
 | Medium | Move imports to top of file | Trivial |
 | Medium | Structured logging | Medium |
 | Low | Optimize deepcopy usage | Low |

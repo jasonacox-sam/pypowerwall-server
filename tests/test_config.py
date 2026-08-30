@@ -68,3 +68,26 @@ def test_gateway_config_rsa_key_path():
     )
     assert config.rsa_key_path == "/keys/tedapi_rsa_private.pem"
     assert config.gw_pwd is None
+
+
+def test_rate_limit_defaults():
+    """Rate limiting is disabled by default with dashboard-friendly limits."""
+    settings = Settings()
+    assert settings.rate_limit_enabled is False
+    assert settings.rate_limit_max_requests == 1000
+    assert settings.rate_limit_window_seconds == 60
+    assert settings.rate_limit_max_buckets == 10000
+
+
+def test_rate_limit_from_env(monkeypatch):
+    """Test loading rate limit settings from PW_RATE_LIMIT_* environment variables."""
+    monkeypatch.setenv("PW_RATE_LIMIT_ENABLED", "true")
+    monkeypatch.setenv("PW_RATE_LIMIT_MAX_REQUESTS", "500")
+    monkeypatch.setenv("PW_RATE_LIMIT_WINDOW_SECONDS", "30")
+    monkeypatch.setenv("PW_RATE_LIMIT_MAX_BUCKETS", "5000")
+
+    settings = Settings()
+    assert settings.rate_limit_enabled is True
+    assert settings.rate_limit_max_requests == 500
+    assert settings.rate_limit_window_seconds == 30
+    assert settings.rate_limit_max_buckets == 5000

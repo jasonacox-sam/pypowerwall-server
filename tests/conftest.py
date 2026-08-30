@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import Mock
 from fastapi.testclient import TestClient
 from app.main import app
+from app import main as main_module
 from app.config import settings
 from app.core.gateway_manager import gateway_manager
 from app.core.scaling import raw_to_tesla_battery_percent
@@ -60,6 +61,14 @@ def isolate_timeseries_store(tmp_path, monkeypatch):
     reset_timeseries_store()
     yield
     reset_timeseries_store()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limit_buckets():
+    """Clear rate limiter bucket state before and after each test."""
+    main_module._rate_limit_buckets.clear()
+    yield
+    main_module._rate_limit_buckets.clear()
 
 
 @pytest.fixture
