@@ -95,7 +95,7 @@ Powerwall 3 units expose a small set of local API endpoints over their wired LAN
 docker run -d \
   --name pypowerwall-server \
   --network host \
-  -e PW_HOST=10.42.1.44 \
+  -e PW_HOST=<pw3-ip> \
   -e PW_PASSWORD=your_customer_password \
   -v pws-data:/data \
   jasonacox/pypowerwall-server
@@ -111,7 +111,7 @@ The local Basic LAN connection is read-only. To control your Powerwall from this
 docker run -d \
   --name pypowerwall-server \
   --network host \
-  -e PW_HOST=10.42.1.44 \
+  -e PW_HOST=<pw3-ip> \
   -e PW_PASSWORD=your_customer_password \
   -e PW_EMAIL="your@email.com" \
   -e PW_AUTH_PATH=/auth \
@@ -608,6 +608,33 @@ When control is enabled:
 - Applies to `/control/*` and the per-gateway POST proxy
   (`POST /api/gateways/{id}/api/*`)
 - When `PW_CONTROL_SECRET` is not set, all write endpoints return 403
+
+**Calling the control API:**
+
+```bash
+TOKEN=$PW_CONTROL_SECRET
+
+# Set backup reserve to 20%
+curl -X POST http://localhost:8675/control/reserve \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"value": 20}'
+
+# Set operating mode (self_consumption, backup, autonomous)
+curl -X POST http://localhost:8675/control/mode \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"value": "self_consumption"}'
+
+# Set mode + reserve in one call (companion parameter)
+curl -X POST http://localhost:8675/control/mode \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"value": "self_consumption", "level": 20}'
+```
+
+> **Note on reserve 0:** changing the operating mode together with a reserve
+> level of `0` is applied by Tesla's cloud API as two separate commands, and
+> the mode change can be silently dropped (HTTP 200, but the mode doesn't
+> stick). If you need mode + reserve 0, set the mode with the *current* reserve
+> level first, then set the reserve to `0` in a separate call.
 
 ### Data Aggregation Strategy
 Multi-gateway aggregation uses **smart aggregation** that will evolve over time:
