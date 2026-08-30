@@ -362,11 +362,11 @@ def test_control_cloud_returns_none_gives_503(
 def test_control_reserve_fallback_without_cloud(
     control_client, connected_gateway, mock_pypowerwall
 ):
-    """Test that POST /control/reserve falls back to call_api when no _cloud_control."""
+    """POST /control/reserve without cloud control calls set_reserve() on the local connection."""
     from app.core.gateway_manager import gateway_manager
 
     gateway_manager._cloud_control = None
-    mock_pypowerwall.post.return_value = {"result": "Updated"}
+    mock_pypowerwall.set_reserve.return_value = {"result": "Updated"}
 
     response = control_client.post(
         "/control/reserve",
@@ -375,7 +375,29 @@ def test_control_reserve_fallback_without_cloud(
     )
 
     assert response.status_code == 200
-    mock_pypowerwall.post.assert_called_once()
+    mock_pypowerwall.set_reserve.assert_called_once_with(20)
+    mock_pypowerwall.post.assert_not_called()
+
+
+def test_control_mode_fallback_without_cloud_uses_local_set_mode(
+    control_client, connected_gateway, mock_pypowerwall
+):
+    """POST /control/mode without cloud control calls set_mode() locally (issue #82)."""
+    from app.core.gateway_manager import gateway_manager
+
+    gateway_manager._cloud_control = None
+    mock_pypowerwall.set_mode.return_value = {"result": "Updated"}
+
+    response = control_client.post(
+        "/control/mode",
+        json={"value": "self_consumption"},
+        headers={"Authorization": _CONTROL_TOKEN},
+    )
+
+    assert response.status_code == 200
+    mock_pypowerwall.set_mode.assert_called_once_with("self_consumption")
+    # Must NOT raw-POST /api/mode — that is the bug from issue #82
+    mock_pypowerwall.post.assert_not_called()
 
 
 def test_control_unmapped_path_uses_call_api(
@@ -548,11 +570,11 @@ def test_control_mode_with_boolean_level_returns_400(
 def test_control_reserve_companion_fallback_without_cloud(
     control_client, connected_gateway, mock_pypowerwall
 ):
-    """POST /control/reserve with mode= falls back to call_api when no cloud control."""
+    """POST /control/reserve with mode= calls set_operation() locally when no cloud control."""
     from app.core.gateway_manager import gateway_manager
 
     gateway_manager._cloud_control = None
-    mock_pypowerwall.post.return_value = {"result": "Updated"}
+    mock_pypowerwall.set_operation.return_value = {"result": "Updated"}
 
     response = control_client.post(
         "/control/reserve",
@@ -561,17 +583,18 @@ def test_control_reserve_companion_fallback_without_cloud(
     )
 
     assert response.status_code == 200
-    mock_pypowerwall.post.assert_called_once()
+    mock_pypowerwall.set_operation.assert_called_once_with(5, "self_consumption")
+    mock_pypowerwall.post.assert_not_called()
 
 
 def test_control_mode_companion_fallback_without_cloud(
     control_client, connected_gateway, mock_pypowerwall
 ):
-    """POST /control/mode with level= falls back to call_api when no cloud control."""
+    """POST /control/mode with level= calls set_operation() locally when no cloud control."""
     from app.core.gateway_manager import gateway_manager
 
     gateway_manager._cloud_control = None
-    mock_pypowerwall.post.return_value = {"result": "Updated"}
+    mock_pypowerwall.set_operation.return_value = {"result": "Updated"}
 
     response = control_client.post(
         "/control/mode",
@@ -580,7 +603,8 @@ def test_control_mode_companion_fallback_without_cloud(
     )
 
     assert response.status_code == 200
-    mock_pypowerwall.post.assert_called_once()
+    mock_pypowerwall.set_operation.assert_called_once_with(80, "backup")
+    mock_pypowerwall.post.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
