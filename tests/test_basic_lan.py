@@ -340,3 +340,40 @@ async def test_stats_reports_basic_lan_mode(monkeypatch):
         assert data["tedapi"] is False
 
     await gateway_manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_stats_reports_hybrid_when_cloud_control_active(monkeypatch):
+    """When the cloud-control connection is live, /stats must report cloudcontrol=True.
+
+    Regression (nesys, PR #85): a Basic LAN gateway with cloud credentials is
+    a *hybrid* setup, but the Console connect-mode card said only "Basic LAN" —
+    hiding the cloud side entirely and masking degradation when WAN drops.
+    """
+    import pypowerwall
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    mock_pw = _make_basic_lan_pw_mock()
+    monkeypatch.setattr(pypowerwall, "Powerwall", lambda **kw: mock_pw)
+
+    configs = [
+        GatewayConfig(id="pw3", name="PW3", host="10.42.1.44", password="12345")
+    ]
+    await gateway_manager.initialize(configs, poll_interval=5)
+
+    # Simulate the background cloud-control init having completed
+    from unittest.mock import Mock
+
+    gateway_manager._cloud_control = Mock()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["basiclan"] is True
+        assert data["cloudcontrol"] is True  # Console renders "Hybrid"
+
+    await gateway_manager.shutdown()

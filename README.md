@@ -123,7 +123,7 @@ docker run -d \
 docker exec -it pypowerwall-server python -m pypowerwall setup
 ```
 
-Both pieces are required for control: `PW_EMAIL` identifies the Tesla account, and `PW_AUTH_PATH` points at the directory holding the `.pypowerwall.auth` / `.pypowerwall.site` token files created by the one-time setup (email alone is not enough — the cloud connection has no password to log in with). With both set, `/control/reserve`, `/control/mode` and `/control/grid_charging` route through the cloud connection while all monitoring data keeps coming from the local Basic LAN endpoints (no internet needed for reads). If the cloud connection can't be established, monitoring is unaffected and control requests return an error.
+Both pieces are required for control: `PW_EMAIL` identifies the Tesla account, and `PW_AUTH_PATH` points at the directory holding the `.pypowerwall.auth` / `.pypowerwall.site` token files created by the one-time setup (email alone is not enough — the cloud connection has no password to log in with). With both set, `/control/reserve`, `/control/mode` and `/control/grid_charging` route through the cloud connection while all monitoring data keeps coming from the local Basic LAN endpoints (no internet needed for reads). The Console shows **Hybrid** as the connect mode while the cloud connection is up. If the cloud connection can't be established, monitoring is unaffected, control requests return an error, and the Console's Powerwall Mode shows `--` (unavailable) rather than a made-up value.
 
 #### Cloud Mode (Remote Access)
 
