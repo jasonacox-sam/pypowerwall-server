@@ -1233,7 +1233,9 @@ async def get_api_operation():
     # was not in). Cached mode and system_status.default_real_mode remain
     # the real fallbacks for gateways that can provide them.
     real_mode = None
-    backup_reserve_percent = 0.0
+    backup_reserve_percent = None
+    stale = False
+    last_updated = None
 
     if status and status.data:
         if status.data.reserve is not None:
@@ -1248,9 +1250,37 @@ async def get_api_operation():
             if mode:
                 real_mode = mode
 
+    # Hybrid stale fallback (issue #87): Basic LAN has no local mode/reserve
+    # endpoint, so when the cloud link drops the values above go null. Serve
+    # the last known cloud value explicitly marked stale — with its fetch
+    # time — instead of either fabricating a default or silently freezing
+    # the previous reading. When no cloud value was ever seen, null stands
+    # and consumers render "unavailable".
+    if real_mode is None or backup_reserve_percent is None:
+        cloud_link = gateway_manager.cloud_link_status()
+        if cloud_link:
+            times = []
+            if real_mode is None and cloud_link["last_known_mode"]:
+                real_mode = cloud_link["last_known_mode"]
+                stale = True
+                if cloud_link["last_known_mode_time"]:
+                    times.append(cloud_link["last_known_mode_time"])
+            if (
+                backup_reserve_percent is None
+                and cloud_link["last_known_reserve"] is not None
+            ):
+                backup_reserve_percent = cloud_link["last_known_reserve"]
+                stale = True
+                if cloud_link["last_known_reserve_time"]:
+                    times.append(cloud_link["last_known_reserve_time"])
+            if times:
+                last_updated = max(times)
+
     return {
         "real_mode": real_mode,
         "backup_reserve_percent": backup_reserve_percent,
+        "stale": stale,
+        "last_updated": last_updated,
     }
 
 
@@ -1985,6 +2015,12 @@ async def get_stats():
     # pattern as the poll loop).
     cloudcontrol = gateway_manager._cloud_control is not None
 
+    # Per-link hybrid health (issue #87): the cloud-control connection is a
+    # separate link with its own failure tracking. None when hybrid mode is
+    # not configured, so non-hybrid /stats output is unchanged.
+    cloud_link = gateway_manager.cloud_link_status()
+    cloud_healthy = cloud_link["healthy"] if cloud_link else None
+
     # Determine mode string
     if fleetapi:
         mode = "FleetAPI"
@@ -2030,15 +2066,23 @@ async def get_stats():
 
     # Build connection health section
     total_failures = sum(gateway_manager._consecutive_failures.values())
+    # Local-link degradation only (previous is_degraded semantics).
+    local_degraded = any(
+        f > 0 for f in gateway_manager._consecutive_failures.values()
+    )
     connection_health = {
         "consecutive_failures": gateway_manager._consecutive_failures.get("default", 0),
         "total_failures": total_failures,
         "total_successes": request_stats["gets"]
         + request_stats["posts"]
         - request_stats["errors"],
-        "is_degraded": any(
-            f > 0 for f in gateway_manager._consecutive_failures.values()
-        ),
+        # Hybrid-aware overall degradation (issue #87): a down cloud link
+        # degrades the *system* even when local monitoring is healthy. For
+        # non-hybrid setups cloud_healthy is None and this is exactly the
+        # previous local-only semantics.
+        "is_degraded": local_degraded or (cloud_healthy is False),
+        "local_healthy": not local_degraded,
+        "cloud_healthy": cloud_healthy,
         "last_success_time": time.time() if online_count > 0 else 0,
         "cache_size": total_gateways,
     }
@@ -2064,6 +2108,7 @@ async def get_stats():
         "tedapi": tedapi,
         "basiclan": basiclan,
         "cloudcontrol": cloudcontrol,
+        "cloud_control": cloud_link,
         "pw3": pw3,
         "tedapi_mode": tedapi_mode,
         "siteid": siteid,

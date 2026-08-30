@@ -1360,6 +1360,14 @@
                         <div class="health-label">Connection</div>
                         <div class="health-value" id="server-connection">--</div>
                     </div>
+                    <div class="health-item" id="local-link-item" style="display:none">
+                        <div class="health-label">Local Link</div>
+                        <div class="health-value" id="server-local-link">--</div>
+                    </div>
+                    <div class="health-item" id="cloud-link-item" style="display:none">
+                        <div class="health-label">Cloud Link</div>
+                        <div class="health-value" id="server-cloud-link">--</div>
+                    </div>
                     <div class="health-item">
                         <div class="health-label">Server Uptime</div>
                         <div class="health-value" id="server-uptime">--</div>
@@ -2341,8 +2349,10 @@
                 } else if (stats.cloudmode) {
                     mode = 'Cloud';
                 } else if (stats.basiclan) {
-                    // Hybrid = Basic LAN local reads + cloud control connection
-                    mode = stats.cloudcontrol ? 'Hybrid' : 'Basic LAN';
+                    // Hybrid = Basic LAN local reads + a configured cloud-control
+                    // link. Stays 'Hybrid' even while the cloud link is down — the
+                    // per-link rows below show which side is degraded (#87).
+                    mode = (stats.cloud_control?.configured || stats.cloudcontrol) ? 'Hybrid' : 'Basic LAN';
                 } else if (stats.tedapi) {
                     const hasRsaKey = Object.values(gatewayMeta).some(gw => gw.rsa_key_configured);
                     mode = hasRsaKey ? 'TEDAPI v1r' : 'TEDAPI';
@@ -2376,6 +2386,32 @@
                     }
                 }
                 document.getElementById('server-connection').textContent = connStatus;
+                
+                // Per-link health sub-rows (hybrid only, #87): local vs cloud.
+                // Shown when hybrid credentials are configured so a WAN outage
+                // reads as "Connection: Degraded / Local: Healthy / Cloud:
+                // Unavailable" instead of a plain healthy local-only card.
+                const hybridConfigured = !!(stats.cloud_control?.configured);
+                const localLinkItem = document.getElementById('local-link-item');
+                const cloudLinkItem = document.getElementById('cloud-link-item');
+                if (hybridConfigured) {
+                    localLinkItem.style.display = '';
+                    cloudLinkItem.style.display = '';
+                    const localOk = connHealth ? connHealth.local_healthy !== false : true;
+                    document.getElementById('server-local-link').textContent =
+                        localOk ? '✓ Healthy' : '⚠️ Degraded';
+                    const cloudStates = {
+                        healthy: '✓ Healthy',
+                        degraded: '⚠️ Degraded',
+                        unavailable: '✗ Unavailable'
+                    };
+                    const cloudState = stats.cloud_control?.state || 'unavailable';
+                    document.getElementById('server-cloud-link').textContent =
+                        cloudStates[cloudState] || cloudState;
+                } else {
+                    localLinkItem.style.display = 'none';
+                    cloudLinkItem.style.display = 'none';
+                }
                 
                 // Uptime
                 document.getElementById('server-uptime').textContent = stats.uptime || '--';
@@ -2424,7 +2460,10 @@
                         };
                         const rawMode = opData.real_mode || '';
                         const pwMode = modeMap[rawMode] || rawMode || '--';
-                        document.getElementById('server-pw-mode').textContent = pwMode;
+                        // Stale marker (#87): last known cloud value while the
+                        // cloud link is down — honest about what it is.
+                        const staleMark = (opData.stale && rawMode) ? ' (stale)' : '';
+                        document.getElementById('server-pw-mode').textContent = pwMode + staleMark;
                     }
                 } catch (e) {
                     console.log('Operation mode not available:', e.message);
