@@ -21,6 +21,14 @@ def _reset_singleton_state():
     gateway_manager.cache.clear()
     gateway_manager._cloud_control = None
     gateway_manager._cloud_control_task = None
+    # Hybrid cloud-link health bookkeeping (issue #87)
+    gateway_manager._cloud_control_configured = False
+    gateway_manager._cloud_failures = 0
+    gateway_manager._cloud_last_success = None
+    gateway_manager._cloud_mode = None
+    gateway_manager._cloud_mode_time = None
+    gateway_manager._cloud_reserve = None
+    gateway_manager._cloud_reserve_time = None
     gateway_manager._executor = None
     gateway_manager._poll_tasks.clear()
     gateway_manager._mqtt_tasks.clear()

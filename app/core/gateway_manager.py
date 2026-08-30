@@ -160,6 +160,22 @@ class GatewayManager:
         # TEDAPI for fast local reads, cloud for control writes.
         self._cloud_control: Optional[pypowerwall.Powerwall] = None
 
+        # Hybrid cloud-link health (issue #87): the shared cloud connection
+        # is a second link with its own failure profile, tracked separately
+        # from local gateway poll failures. A WAN outage leaves local
+        # monitoring healthy while cloud control degrades, and the Console
+        # needs to show both links independently.
+        self._cloud_control_configured = False  # hybrid credentials present
+        self._cloud_failures = 0  # consecutive cloud call failures
+        self._cloud_last_success: Optional[float] = None  # last successful call
+        # Last known cloud-sourced operation values + fetch timestamps. Used
+        # to serve stale-marked (not silently frozen) mode/reserve when the
+        # cloud link drops after having been up (issue #87).
+        self._cloud_mode: Optional[str] = None
+        self._cloud_mode_time: Optional[float] = None
+        self._cloud_reserve: Optional[float] = None
+        self._cloud_reserve_time: Optional[float] = None
+
     @staticmethod
     def _expected_battery_block_count(data: Optional[PowerwallData]) -> int:
         """Return expected battery block count from cached TEDAPI config when available."""
@@ -186,6 +202,11 @@ class GatewayManager:
     # Max consecutive polls a preserved snapshot is promoted before letting
     # partial data through.  Prevents stale follower data from living forever.
     _PRESERVE_STALENESS_CAP = 3
+
+    # Consecutive cloud-control call failures before the hybrid cloud link
+    # is reported "unavailable" rather than "degraded" (issue #87). Mirrors
+    # the TEDAPI fallback threshold so both links use the same convention.
+    _CLOUD_UNAVAILABLE_THRESHOLD = 3
 
     def _preserve_complete_multi_pw_snapshot(
         self, gateway_id: str, data: PowerwallData
@@ -420,6 +441,9 @@ class GatewayManager:
             and config.email
             and not config.cloud_mode
         ]
+        # Hybrid configured => the cloud link exists as a tracked link even
+        # while the connection itself is down (issue #87 per-link health).
+        self._cloud_control_configured = bool(hybrid_configs)
         if hybrid_configs:
             self._cloud_control_task = asyncio.create_task(
                 self._init_cloud_control(hybrid_configs), name="cloud-control-init"
@@ -833,6 +857,11 @@ class GatewayManager:
                     )
                     if cloud_mode:
                         data.mode = cloud_mode
+                        # Remember the last cloud-sourced value so /api/operation
+                        # can serve it stale-marked (not silently frozen) if the
+                        # cloud link later drops (issue #87).
+                        self._cloud_mode = cloud_mode
+                        self._cloud_mode_time = time.time()
                 except (asyncio.TimeoutError, Exception) as e:
                     logger.debug(
                         f"Operation mode not available via cloud control for {gateway_id}: {e}"
@@ -843,6 +872,8 @@ class GatewayManager:
                     )
                     if cloud_reserve is not None:
                         data.reserve = cloud_reserve
+                        self._cloud_reserve = cloud_reserve
+                        self._cloud_reserve_time = time.time()
                 except (asyncio.TimeoutError, Exception) as e:
                     logger.debug(
                         f"Reserve not available via cloud control for {gateway_id}: {e}"
@@ -1679,6 +1710,44 @@ class GatewayManager:
             logger.warning(f"[{gateway_id}] call_api({method}) error: {e}")
             return None
 
+    def cloud_link_status(self) -> Optional[Dict[str, Any]]:
+        """Per-link health for the shared hybrid cloud-control connection (#87).
+
+        Returns None when hybrid mode is not configured, so non-hybrid
+        setups keep their previous /stats shape and semantics untouched.
+
+        States:
+            healthy     - connection live, no consecutive failures
+            degraded    - connection live but recent calls failing
+            unavailable - never connected, or failures >= threshold
+
+        Also carries the last known cloud-sourced mode/reserve with their
+        fetch timestamps, so consumers can serve stale-marked values when
+        the cloud link drops after having been up.
+        """
+        if not self._cloud_control_configured:
+            return None
+        if self._cloud_control is None:
+            state = "unavailable"
+        elif self._cloud_failures >= self._CLOUD_UNAVAILABLE_THRESHOLD:
+            state = "unavailable"
+        elif self._cloud_failures > 0:
+            state = "degraded"
+        else:
+            state = "healthy"
+        return {
+            "configured": True,
+            "connected": self._cloud_control is not None,
+            "state": state,
+            "healthy": state == "healthy",
+            "consecutive_failures": self._cloud_failures,
+            "last_success_time": self._cloud_last_success,
+            "last_known_mode": self._cloud_mode,
+            "last_known_mode_time": self._cloud_mode_time,
+            "last_known_reserve": self._cloud_reserve,
+            "last_known_reserve_time": self._cloud_reserve_time,
+        }
+
     async def cloud_control(
         self, method: str, *args, timeout: float = 10.0, **kwargs
     ) -> Optional[Any]:
@@ -1727,15 +1796,22 @@ class GatewayManager:
                 logger.info(f"cloud_control({method}) completed successfully")
             else:
                 logger.debug(f"cloud_control({method}) completed successfully")
+            # Cloud link health (issue #87): a completed call means the link
+            # is alive - clear the consecutive-failure counter and stamp the
+            # last-success time. Same event-loop-only access as the poll loop.
+            self._cloud_failures = 0
+            self._cloud_last_success = time.time()
             return result
         except asyncio.TimeoutError:
             logger.warning(f"cloud_control({method}) timeout after {timeout}s")
+            self._cloud_failures += 1
             return None
         except AttributeError:
             logger.error(f"cloud_control({method}): method not found")
             return None
         except Exception as e:
             logger.warning(f"cloud_control({method}) error: {e}")
+            self._cloud_failures += 1
             return None
 
     async def local_control(

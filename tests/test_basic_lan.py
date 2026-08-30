@@ -377,3 +377,257 @@ async def test_stats_reports_hybrid_when_cloud_control_active(monkeypatch):
         assert data["cloudcontrol"] is True  # Console renders "Hybrid"
 
     await gateway_manager.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Issue #87 — per-link hybrid health (Local/Cloud) and stale-marked mode/reserve
+# ---------------------------------------------------------------------------
+
+
+def test_cloud_link_status_none_when_hybrid_not_configured():
+    """Non-hybrid setups: cloud_link_status() is None, /stats shape unchanged."""
+    gateway_manager._cloud_control_configured = False
+    assert gateway_manager.cloud_link_status() is None
+
+
+@pytest.mark.asyncio
+async def test_hybrid_poll_records_last_known_cloud_values(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """A successful hybrid poll records the last known cloud mode/reserve (#87).
+
+    These power the stale-marked /api/operation fallback when the cloud link
+    later drops: consumers must see the last known value *marked stale*, not a
+    silently frozen reading.
+    """
+    import time
+
+    mock_pypowerwall.tedapi = None
+
+    mock_cloud = Mock()
+    mock_cloud.get_mode.return_value = "autonomous"
+    mock_cloud.get_reserve.return_value = 12.0
+    gateway_manager._cloud_control = mock_cloud
+    gateway_manager._cloud_control_configured = True
+
+    gw = Gateway(id="pw3-lastknown", name="PW3", host="10.42.1.44", basic_lan=True)
+    gateway_manager.gateways["pw3-lastknown"] = gw
+    gateway_manager.connections["pw3-lastknown"] = mock_pypowerwall
+
+    before = time.time()
+    await gateway_manager._fetch_gateway_data("pw3-lastknown", mock_pypowerwall)
+
+    assert gateway_manager._cloud_mode == "autonomous"
+    assert gateway_manager._cloud_reserve == 12.0
+    assert gateway_manager._cloud_mode_time >= before
+    assert gateway_manager._cloud_reserve_time >= before
+    assert gateway_manager._cloud_failures == 0
+
+    link = gateway_manager.cloud_link_status()
+    assert link["state"] == "healthy"
+    assert link["healthy"] is True
+    assert link["last_known_mode"] == "autonomous"
+    assert link["last_known_reserve"] == 12.0
+
+
+@pytest.mark.asyncio
+async def test_cloud_link_health_degrades_then_recovers(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """Cloud link health: degraded on failures, unavailable past threshold (#87).
+
+    A WAN outage with local monitoring healthy is exactly the case the Console
+    needs to surface: Local: Healthy / Cloud: Unavailable. The link must also
+    recover to healthy when the cloud comes back.
+    """
+    mock_pypowerwall.tedapi = None
+
+    mock_cloud = Mock()
+    mock_cloud.get_mode.side_effect = Exception("WAN blocked")
+    mock_cloud.get_reserve.side_effect = Exception("WAN blocked")
+    gateway_manager._cloud_control = mock_cloud
+    gateway_manager._cloud_control_configured = True
+
+    gw = Gateway(id="pw3-wan", name="PW3", host="10.42.1.44", basic_lan=True)
+    gateway_manager.gateways["pw3-wan"] = gw
+    gateway_manager.connections["pw3-wan"] = mock_pypowerwall
+
+    # Each poll attempts get_mode + get_reserve: 2 failures per cycle.
+    await gateway_manager._fetch_gateway_data("pw3-wan", mock_pypowerwall)
+    link = gateway_manager.cloud_link_status()
+    assert link["state"] == "degraded"
+    assert link["connected"] is True
+
+    await gateway_manager._fetch_gateway_data("pw3-wan", mock_pypowerwall)
+    link = gateway_manager.cloud_link_status()
+    assert link["state"] == "unavailable"  # failures >= threshold
+
+    # Recovery: WAN returns, values refresh, link flips back to healthy.
+    mock_cloud.get_mode.side_effect = None
+    mock_cloud.get_mode.return_value = "self_consumption"
+    mock_cloud.get_reserve.side_effect = None
+    mock_cloud.get_reserve.return_value = 20.0
+    data = await gateway_manager._fetch_gateway_data("pw3-wan", mock_pypowerwall)
+    link = gateway_manager.cloud_link_status()
+    assert link["state"] == "healthy"
+    assert gateway_manager._cloud_failures == 0
+    assert data.mode == "self_consumption"
+
+
+@pytest.mark.asyncio
+async def test_stats_reports_per_link_hybrid_health(monkeypatch):
+    """/stats exposes cloud_control link state + hybrid-aware is_degraded (#87)."""
+    import pypowerwall
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    mock_pw = _make_basic_lan_pw_mock()
+    monkeypatch.setattr(pypowerwall, "Powerwall", lambda **kw: mock_pw)
+
+    configs = [
+        GatewayConfig(
+            id="pw3",
+            name="PW3",
+            host="10.42.1.44",
+            password="12345",
+            email="tesla@example.com",
+            authpath="/auth",
+        )
+    ]
+    await gateway_manager.initialize(configs, poll_interval=5)
+
+    # Simulate the background cloud-control init having completed
+    gateway_manager._cloud_control = Mock()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cloud_control"]["configured"] is True
+        assert data["cloud_control"]["state"] == "healthy"
+        assert data["connection_health"]["local_healthy"] is True
+        assert data["connection_health"]["cloud_healthy"] is True
+        assert data["connection_health"]["is_degraded"] is False
+
+    await gateway_manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_stats_degraded_when_cloud_down_but_local_healthy(monkeypatch):
+    """Local healthy + cloud unavailable => overall Degraded, Local row Healthy (#87).
+
+    The old card read Healthy in this state because Connection tracked the
+    local link only, hiding the degraded control path entirely.
+    """
+    import pypowerwall
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    mock_pw = _make_basic_lan_pw_mock()
+    monkeypatch.setattr(pypowerwall, "Powerwall", lambda **kw: mock_pw)
+
+    configs = [
+        GatewayConfig(
+            id="pw3",
+            name="PW3",
+            host="10.42.1.44",
+            password="12345",
+            email="tesla@example.com",
+            authpath="/auth",
+        )
+    ]
+    await gateway_manager.initialize(configs, poll_interval=5)
+
+    # Cloud link up at some point (values recorded), then WAN dropped.
+    gateway_manager._cloud_control = Mock()
+    gateway_manager._cloud_failures = 7
+    gateway_manager._cloud_mode = "autonomous"
+    gateway_manager._cloud_mode_time = 1759100000.0
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cloud_control"]["state"] == "unavailable"
+        assert data["cloud_control"]["last_known_mode"] == "autonomous"
+        assert data["connection_health"]["local_healthy"] is True
+        assert data["connection_health"]["cloud_healthy"] is False
+        assert data["connection_health"]["is_degraded"] is True  # hybrid-aware
+
+    await gateway_manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_api_operation_serves_stale_cloud_mode_when_link_down(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """/api/operation: last known cloud value, marked stale, when link is down (#87).
+
+    Not a silent freeze: consumers get stale=True plus the fetch time, and the
+    Console renders "Self-Consumption (stale)".
+    """
+    from app.models.gateway import PowerwallData, GatewayStatus
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    gw = Gateway(id="pw3-stale-api", name="PW3", host="10.42.1.44", basic_lan=True)
+    gateway_manager.gateways["pw3-stale-api"] = gw
+    gateway_manager.connections["pw3-stale-api"] = mock_pypowerwall
+    gateway_manager.cache["pw3-stale-api"] = GatewayStatus(
+        gateway=gw, data=PowerwallData(), online=True, last_updated=1.0
+    )
+
+    # Hybrid configured; cloud was up (mode/reserve seen), now down.
+    gateway_manager._cloud_control = Mock()
+    gateway_manager._cloud_control_configured = True
+    gateway_manager._cloud_failures = 7
+    gateway_manager._cloud_mode = "self_consumption"
+    gateway_manager._cloud_mode_time = 1759100000.0
+    gateway_manager._cloud_reserve = 20.0
+    gateway_manager._cloud_reserve_time = 1759100001.0
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/operation")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["real_mode"] == "self_consumption"
+        assert data["backup_reserve_percent"] == 20.0
+        assert data["stale"] is True
+        assert data["last_updated"] == 1759100001.0  # later of the two fetches
+
+
+@pytest.mark.asyncio
+async def test_api_operation_null_when_cloud_never_seen(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """Hybrid but cloud never connected: mode/reserve are null, not fabricated (#87)."""
+    from app.models.gateway import PowerwallData, GatewayStatus
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    gw = Gateway(id="pw3-nun-api", name="PW3", host="10.42.1.44", basic_lan=True)
+    gateway_manager.gateways["pw3-nun-api"] = gw
+    gateway_manager.connections["pw3-nun-api"] = mock_pypowerwall
+    gateway_manager.cache["pw3-nun-api"] = GatewayStatus(
+        gateway=gw, data=PowerwallData(), online=True, last_updated=1.0
+    )
+
+    # Hybrid credentials present but init never succeeded (WAN blocked at boot).
+    gateway_manager._cloud_control = None
+    gateway_manager._cloud_control_configured = True
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/operation")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["real_mode"] is None
+        assert data["backup_reserve_percent"] is None
+        assert data["stale"] is False
