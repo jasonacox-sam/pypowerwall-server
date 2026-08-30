@@ -219,7 +219,7 @@ app.add_middleware(
 # caveats around reverse-proxy deployments and internet-exposed servers.
 _rate_limit_buckets: dict = {}
 
-if settings.rate_limit_enabled:
+if True:  # Middleware is always registered; enabled at runtime via settings.rate_limit_enabled
 
     class _RateLimitMiddleware:
         """Pure ASGI middleware: simple fixed-window rate limiter per client IP."""
@@ -229,6 +229,9 @@ if settings.rate_limit_enabled:
 
         async def __call__(self, scope, receive, send):
             if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+            if not settings.rate_limit_enabled:
                 await self.app(scope, receive, send)
                 return
             client = scope.get("client")
