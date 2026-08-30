@@ -782,6 +782,7 @@ Environment Variables:
   PW_RATE_LIMIT_ENABLED         Enable per-IP rate limiting (default: false)
   PW_RATE_LIMIT_MAX_REQUESTS    Requests per window per IP (default: 1000)
   PW_RATE_LIMIT_WINDOW_SECONDS  Rate limit window in seconds (default: 60)
+  PW_RATE_LIMIT_MAX_BUCKETS     Max tracked client IPs before pruning (default: 10000)
 
 For more information, visit: https://github.com/jasonacox/pypowerwall-server
         """,
