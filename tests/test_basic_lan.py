@@ -194,6 +194,70 @@ async def test_basic_lan_skips_unavailable_endpoint_fetches(
 
 
 @pytest.mark.asyncio
+async def test_basic_lan_hybrid_reads_mode_from_cloud(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """Hybrid Basic LAN: mode/reserve refresh from the cloud control connection.
+
+    Regression (nesys, PR #85): the local Basic LAN API has no operation
+    mode/reserve endpoint, so the Console showed a stale mode from the last
+    cache write instead of the real system state. With a cloud control
+    connection present, mode/reserve must be read from the cloud each poll.
+    """
+    mock_pypowerwall.tedapi = None
+
+    mock_cloud = Mock()
+    mock_cloud.get_mode.return_value = "autonomous"
+    mock_cloud.get_reserve.return_value = 12.0
+    gateway_manager._cloud_control = mock_cloud
+
+    gw = Gateway(id="pw3-hybrid", name="PW3", host="10.42.1.44", basic_lan=True)
+    gateway_manager.gateways["pw3-hybrid"] = gw
+    gateway_manager.connections["pw3-hybrid"] = mock_pypowerwall
+
+    data = await gateway_manager._fetch_gateway_data(
+        "pw3-hybrid", mock_pypowerwall
+    )
+
+    # Mode/reserve come from the cloud control connection
+    mock_cloud.get_mode.assert_called_once()
+    mock_cloud.get_reserve.assert_called_once()
+    assert mock_cloud.get_reserve.call_args.kwargs.get("scale") is True
+    assert data.mode == "autonomous"
+    assert data.reserve == 12.0
+
+    # The local connection is still never asked for mode/reserve
+    mock_pypowerwall.get_mode.assert_not_called()
+    mock_pypowerwall.get_reserve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_basic_lan_without_cloud_does_not_show_stale_mode(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """Plain Basic LAN (no cloud): a cached mode must not be re-served stale.
+
+    There is no source of truth for mode in this mode, so the previous
+    value should be dropped rather than shown forever.
+    """
+    mock_pypowerwall.tedapi = None
+
+    gw = Gateway(id="pw3-stale", name="PW3", host="10.42.1.44", basic_lan=True)
+    gateway_manager.gateways["pw3-stale"] = gw
+    gateway_manager.connections["pw3-stale"] = mock_pypowerwall
+
+    stale = Mock()
+    stale.mode = "self_consumption"
+    gateway_manager._last_successful_data["pw3-stale"] = stale
+
+    data = await gateway_manager._fetch_gateway_data(
+        "pw3-stale", mock_pypowerwall
+    )
+
+    assert data.mode is None
+
+
+@pytest.mark.asyncio
 async def test_tedapi_gateway_still_fetches_optional_data(
     mock_gateway_manager, mock_pypowerwall
 ):

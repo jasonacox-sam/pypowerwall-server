@@ -815,9 +815,38 @@ class GatewayManager:
         # must be polled on every cycle so that mode changes made in the Tesla app
         # are reflected promptly (fixes issue #14).
         # Pre-fill from last known good value so a transient failure doesn't wipe the cache.
+        # Skipped for Basic LAN: that mode has no local mode/reserve endpoint, so a
+        # pre-filled value would go stale forever (issue reported by nesys on #85 -
+        # Console kept showing a mode from a previous control write). Hybrid mode
+        # refreshes from the cloud control connection below instead.
         last_data = self._last_successful_data.get(gateway_id)
-        if last_data and last_data.mode:
+        if last_data and last_data.mode and not basic_lan:
             data.mode = last_data.mode
+        if basic_lan:
+            # Basic LAN local API does not expose operation mode/reserve. When a
+            # hybrid cloud-control connection is available, refresh mode/reserve
+            # from the cloud so the Console reflects the real system state.
+            if self._cloud_control:
+                try:
+                    cloud_mode = await self.cloud_control(
+                        "get_mode", timeout=step_timeout
+                    )
+                    if cloud_mode:
+                        data.mode = cloud_mode
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.debug(
+                        f"Operation mode not available via cloud control for {gateway_id}: {e}"
+                    )
+                try:
+                    cloud_reserve = await self.cloud_control(
+                        "get_reserve", timeout=step_timeout, scale=True
+                    )
+                    if cloud_reserve is not None:
+                        data.reserve = cloud_reserve
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.debug(
+                        f"Reserve not available via cloud control for {gateway_id}: {e}"
+                    )
         if not basic_lan:
             try:
                 data.mode = await asyncio.wait_for(
