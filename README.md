@@ -405,6 +405,34 @@ server {
 | `https://lab.lan/pypowerwall/api/...` | `GET /api/...` — API endpoints |
 | `https://lab.lan/pypowerwall/static/...` | `GET /static/...` — Static assets |
 
+### Rate Limiting
+
+Optional per-client-IP request throttling, **disabled by default**. Most deployments sit behind [Powerwall-Dashboard](https://github.com/jasonacox/Powerwall-Dashboard), Grafana, or Home Assistant, which poll many of the 113+ endpoints every 1-5 seconds — that's the primary use case, not something to be throttled away.
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `PW_RATE_LIMIT_ENABLED` | `no` | Enable per-IP rate limiting |
+| `PW_RATE_LIMIT_MAX_REQUESTS` | `1000` | Requests allowed per window, per client IP |
+| `PW_RATE_LIMIT_WINDOW_SECONDS` | `60` | Length of the rate limit window, in seconds |
+| `PW_RATE_LIMIT_MAX_BUCKETS` | `10000` | Max tracked client IPs before stale/oldest entries are pruned |
+
+```bash
+export PW_RATE_LIMIT_ENABLED=yes
+export PW_RATE_LIMIT_MAX_REQUESTS=1000   # ~16 req/s per IP, well above normal dashboard polling
+export PW_RATE_LIMIT_WINDOW_SECONDS=60
+```
+
+Or via CLI: `pypowerwall-server --rate-limit --rate-limit-max-requests 1000 --rate-limit-window 60`
+
+The default budget (1000 requests / 60s per IP) is set well above a normal dashboard's polling load, so it should not affect typical usage even when enabled. Requests over the limit receive `HTTP 429 {"detail": "Rate limit exceeded"}`.
+
+**Caveats:**
+
+- **Reverse proxies:** if pypowerwall-server sits behind a reverse proxy (see above), every client shares the proxy's IP address, so one rate-limit bucket applies collectively to *all* users behind that proxy. Size the limit accordingly, or rely on the proxy's own per-client rate limiting instead.
+- **Internet-exposed deployments:** this server is designed to be bound to a LAN interface (`PW_BIND_ADDRESS`) behind your firewall — that's the default and recommended setup. If you do expose it to the internet, pair `PW_CONTROL_SECRET` (control endpoint auth) with rate limiting at a real reverse proxy (nginx `limit_req`, Traefik, Caddy) in front of pypowerwall-server. This in-process limiter runs after a connection is already accepted, so it does not protect against connection-level resource exhaustion.
+
 ## MQTT Integration
 
 Set `MQTT_HOST` to enable publishing. All other variables are optional.

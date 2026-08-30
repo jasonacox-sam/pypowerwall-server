@@ -213,39 +213,56 @@ app.add_middleware(
 )
 
 
-# Rate limiting: fixed-window request throttle applied to every endpoint
-# (including /control/* and /api/*) to prevent request flooding/DoS.
-_RATE_LIMIT_MAX_REQUESTS = 120  # requests
-_RATE_LIMIT_WINDOW_SECONDS = 60  # per client IP, per window
+# Rate limiting: optional fixed-window request throttle per client IP, applied
+# to every endpoint (including /control/* and /api/*). Disabled by default —
+# see README "Rate Limiting" section for tuning via PW_RATE_LIMIT_* and the
+# caveats around reverse-proxy deployments and internet-exposed servers.
 _rate_limit_buckets: dict = {}
 
+if settings.rate_limit_enabled:
 
-class _RateLimitMiddleware:
-    """Pure ASGI middleware: simple fixed-window rate limiter per client IP."""
+    class _RateLimitMiddleware:
+        """Pure ASGI middleware: simple fixed-window rate limiter per client IP."""
 
-    def __init__(self, app):
-        self.app = app
+        def __init__(self, app):
+            self.app = app
 
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+            client = scope.get("client")
+            client_ip = client[0] if client else "unknown"
+            now = time.monotonic()
+
+            max_buckets = settings.rate_limit_max_buckets
+            window_seconds = settings.rate_limit_window_seconds
+            if client_ip not in _rate_limit_buckets and len(_rate_limit_buckets) >= max_buckets:
+                # Bound memory: first drop buckets whose window has already
+                # expired, then (if still at/over cap, e.g. many concurrently
+                # active IPs) evict the oldest remaining buckets to make room.
+                for ip, (start, _) in list(_rate_limit_buckets.items()):
+                    if now - start >= window_seconds:
+                        del _rate_limit_buckets[ip]
+                if len(_rate_limit_buckets) >= max_buckets:
+                    oldest_ips = sorted(
+                        _rate_limit_buckets, key=lambda ip: _rate_limit_buckets[ip][0]
+                    )[: len(_rate_limit_buckets) - max_buckets + 1]
+                    for ip in oldest_ips:
+                        del _rate_limit_buckets[ip]
+
+            window_start, count = _rate_limit_buckets.get(client_ip, (now, 0))
+            if now - window_start >= window_seconds:
+                window_start, count = now, 0
+            count += 1
+            _rate_limit_buckets[client_ip] = (window_start, count)
+            if count > settings.rate_limit_max_requests:
+                response = JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
+                await response(scope, receive, send)
+                return
             await self.app(scope, receive, send)
-            return
-        client = scope.get("client")
-        client_ip = client[0] if client else "unknown"
-        now = time.monotonic()
-        window_start, count = _rate_limit_buckets.get(client_ip, (now, 0))
-        if now - window_start >= _RATE_LIMIT_WINDOW_SECONDS:
-            window_start, count = now, 0
-        count += 1
-        _rate_limit_buckets[client_ip] = (window_start, count)
-        if count > _RATE_LIMIT_MAX_REQUESTS:
-            response = JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
-            await response(scope, receive, send)
-            return
-        await self.app(scope, receive, send)
 
-
-app.add_middleware(_RateLimitMiddleware)
+    app.add_middleware(_RateLimitMiddleware)
 
 
 # Cookie max-age for powerflow web app auth compatibility (issue #7)
@@ -759,7 +776,10 @@ Environment Variables:
   PW_PORT            Server port (default: 8675)
   PW_BIND_ADDRESS    Server bind address (default: 0.0.0.0)
   PW_CONFIG          Path to YAML/JSON configuration file
-  
+  PW_RATE_LIMIT_ENABLED         Enable per-IP rate limiting (default: false)
+  PW_RATE_LIMIT_MAX_REQUESTS    Requests per window per IP (default: 1000)
+  PW_RATE_LIMIT_WINDOW_SECONDS  Rate limit window in seconds (default: 60)
+
 For more information, visit: https://github.com/jasonacox/pypowerwall-server
         """,
     )
@@ -789,6 +809,24 @@ For more information, visit: https://github.com/jasonacox/pypowerwall-server
     parser.add_argument("--config", help="Path to YAML/JSON configuration file")
     parser.add_argument(
         "--reload", action="store_true", help="Enable auto-reload for development"
+    )
+    parser.add_argument(
+        "--rate-limit",
+        dest="rate_limit",
+        action="store_true",
+        help="Enable per-IP request rate limiting (default: disabled)",
+    )
+    parser.add_argument(
+        "--rate-limit-max-requests",
+        dest="rate_limit_max_requests",
+        type=int,
+        help="Requests per window per client IP (default: 1000)",
+    )
+    parser.add_argument(
+        "--rate-limit-window",
+        dest="rate_limit_window",
+        type=int,
+        help="Rate limit window in seconds (default: 60)",
     )
 
     args = parser.parse_args()
@@ -848,6 +886,12 @@ For more information, visit: https://github.com/jasonacox/pypowerwall-server
         os.environ["PW_DEBUG"] = "true"
     if args.config:
         os.environ["PW_CONFIG"] = args.config
+    if args.rate_limit:
+        os.environ["PW_RATE_LIMIT_ENABLED"] = "true"
+    if args.rate_limit_max_requests:
+        os.environ["PW_RATE_LIMIT_MAX_REQUESTS"] = str(args.rate_limit_max_requests)
+    if args.rate_limit_window:
+        os.environ["PW_RATE_LIMIT_WINDOW_SECONDS"] = str(args.rate_limit_window)
 
     # Reload settings to pick up CLI overrides
     from app.config import settings

@@ -63,6 +63,12 @@ Environment Variables (Proxy Compatible):
         PW_TEDAPI_RECOVERY          - Auto-recover TEDAPI SolarOnly fallback (default: "yes")
         PW_TEDAPI_PROBE_INTERVAL    - Seconds between TEDAPI health probes (default: 30)
 
+    Rate Limiting (disabled by default; see README "Rate Limiting" section):
+        PW_RATE_LIMIT_ENABLED         - Enable per-IP request rate limiting (default: "no")
+        PW_RATE_LIMIT_MAX_REQUESTS    - Requests per window per client IP (default: 1000)
+        PW_RATE_LIMIT_WINDOW_SECONDS  - Rate limit window in seconds (default: 60)
+        PW_RATE_LIMIT_MAX_BUCKETS     - Max tracked client IPs before pruning (default: 10000)
+
     UI and Advanced:
         PW_STYLE             - UI style: clear/black/white/grafana/grafana-dark (default: "clear")
         PW_AUTH_MODE         - Auth mode: cookie/token (default: "cookie")
@@ -282,6 +288,18 @@ class Settings(BaseSettings):
     graceful_degradation: bool = Field(default=True, alias="PW_GRACEFUL_DEGRADATION")
     health_check: bool = Field(default=True, alias="PW_HEALTH_CHECK")
     cache_ttl: int = Field(default=30, alias="PW_CACHE_TTL")  # Max age for cached data
+
+    # Rate limiting (disabled by default; see README "Rate Limiting" section)
+    rate_limit_enabled: bool = Field(default=False, alias="PW_RATE_LIMIT_ENABLED")
+    rate_limit_max_requests: int = Field(
+        default=1000, alias="PW_RATE_LIMIT_MAX_REQUESTS"
+    )  # Requests per window, per client IP
+    rate_limit_window_seconds: int = Field(
+        default=60, alias="PW_RATE_LIMIT_WINDOW_SECONDS"
+    )
+    rate_limit_max_buckets: int = Field(
+        default=10000, alias="PW_RATE_LIMIT_MAX_BUCKETS"
+    )  # Cap on tracked client IPs before stale/oldest buckets are pruned
 
     # TEDAPI SolarOnly fallback recovery
     tedapi_recovery: bool = Field(

@@ -251,3 +251,16 @@ def test_stats_masks_pii(client, connected_gateway, monkeypatch):
     assert "secret@example.com" not in text
     assert json.loads(text)["config"]["PW_EMAIL"] == "**********"
     assert json.loads(text)["config"]["PW_SITEID"] == "**********"
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting - disabled by default (see tests/test_rate_limit_middleware.py
+# for enabled-state behavior; the middleware is wired in at import time from
+# PW_RATE_LIMIT_ENABLED, so it can't be toggled here via monkeypatched settings)
+# ---------------------------------------------------------------------------
+
+def test_rate_limiting_disabled_by_default(client):
+    """A burst of requests must never 429 unless rate limiting is explicitly enabled."""
+    for _ in range(200):
+        response = client.get("/health")
+        assert response.status_code != 429
