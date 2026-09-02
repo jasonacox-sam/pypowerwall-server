@@ -922,8 +922,9 @@ For more information, visit: https://github.com/jasonacox/pypowerwall-server
             reload=args.reload,
             # Suppress HTTP access logs ("GET /soe 200 OK") unless debug is
             # enabled. uvicorn.run() applies its default logging config which
-            # resets logger levels set at import time, so access_log=False is
-            # the reliable switch here (see discussion #86).
+            # resets logger levels set at import time, so passing
+            # access_log=settings.debug (False unless debug) is the reliable
+            # switch here (see discussion #86).
             access_log=settings.debug,
         )
     except KeyboardInterrupt:
