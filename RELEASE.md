@@ -2,7 +2,15 @@
 
 ## Version History
 
-### [0.6.0] - Upcoming
+### [0.6.1] - 2026-09-01
+
+**Changed:**
+- **Bumped pypowerwall dependency to 0.17.1** — picks up the cloud `set_operation()` fixes validated on PW3 hardware during hybrid-mode testing (#79, #85). Docker images now ship pypowerwall 0.17.1.
+
+**Fixed:**
+- **Uvicorn HTTP access logs are no longer emitted when debug mode is disabled** — the server previously logged every request line (`INFO: 192.168.1.3 - "GET /soe HTTP/1.1" 200 OK`) even without `PW_DEBUG`, because `uvicorn.run()` applies its default logging config and resets logger levels set at import time. Access logs are now disabled at the source via `access_log=settings.debug`. (#86)
+
+### [0.6.0] - 2026-08-30
 
 **Added:**
 - **Powerwall 3 Basic LAN support (`PW_HOST` + `PW_PASSWORD`)** — you can now connect a PW3 gateway using only its local address and Basic password (the one printed on the gateway QR card / in the Tesla app), with no Tesla cloud credentials and no `PW_EMAIL`/`PW_TOKEN`. Uses the gateway's local TEDAPI via the pypowerwall library's Basic auth mode; poll-only (no cloud control), consistent with local v1r connections. Connection mode is reported in the Console gateway card.
