@@ -132,6 +132,9 @@ class GatewayManager:
         self._last_successful_data: Dict[
             str, PowerwallData
         ] = {}  # Keep last good data for graceful degradation
+        self._firmware_seen: Dict[
+            str, str
+        ] = {}  # Last logged firmware per gateway (#854) — survives transient fetch misses
         self._pending_configs: Dict[
             str, GatewayConfig
         ] = {}  # Gateways waiting for lazy initialization
@@ -1184,6 +1187,32 @@ class GatewayManager:
             previous_failures = self._consecutive_failures.get(gateway_id, 0)
             self._consecutive_failures[gateway_id] = 0
             self._next_poll_time[gateway_id] = 0  # Poll normally next cycle
+
+            # Firmware change tracking (Powerwall-Dashboard#854): log the
+            # gateway firmware once at first successful poll and a dated line
+            # on every change, so `docker logs pypowerwall-server` answers
+            # "when did my firmware update?". Uses _firmware_seen (not the
+            # last poll snapshot) so a transient version-fetch miss doesn't
+            # re-log the same version. Basic LAN skips the version fetch
+            # (data.version stays None) — no noise.
+            new_firmware = data.version
+            if new_firmware is not None:
+                # Sanitize external input — coerce to str, collapse
+                # whitespace, and drop control chars (log-forging guard)
+                new_firmware = " ".join(str(new_firmware).split())
+                new_firmware = "".join(c for c in new_firmware if c >= " ")
+            if new_firmware:
+                seen_firmware = self._firmware_seen.get(gateway_id)
+                if seen_firmware is None:
+                    logger.info(
+                        f"Gateway {gateway_id} firmware: {new_firmware}"
+                    )
+                elif new_firmware != seen_firmware:
+                    logger.info(
+                        f"Gateway {gateway_id} firmware changed: "
+                        f"{seen_firmware} -> {new_firmware}"
+                    )
+                self._firmware_seen[gateway_id] = new_firmware
 
             # Store successful data for graceful degradation
             self._last_successful_data[gateway_id] = data
