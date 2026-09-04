@@ -1197,10 +1197,10 @@ class GatewayManager:
             # (data.version stays None) — no noise.
             new_firmware = data.version
             if new_firmware is not None:
-                # Sanitize external input — coerce to str, collapse
-                # whitespace, and drop control chars (log-forging guard)
-                new_firmware = " ".join(str(new_firmware).split())
-                new_firmware = "".join(c for c in new_firmware if c >= " ")
+                # Sanitize external input — collapse
+                # whitespace and drop control chars (log-forging guard)
+                new_firmware = " ".join(new_firmware.split())
+                new_firmware = "".join(c for c in new_firmware if c.isprintable())
             if new_firmware:
                 seen_firmware = self._firmware_seen.get(gateway_id)
                 if seen_firmware is None:

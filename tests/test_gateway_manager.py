@@ -856,3 +856,81 @@ async def test_initialize_cloud_control_exception_is_handled(monkeypatch):
     assert gm._cloud_control is None
 
     await gm.shutdown()
+
+
+# --- Firmware change logging (Powerwall-Dashboard #854) ---
+
+def _add_firmware_gateway(mock_gateway_manager, mock_pypowerwall, gw_id="fw-test"):
+    """Register a connected gateway whose firmware we can drive via mock version()."""
+    from app.models.gateway import Gateway, GatewayStatus
+
+    gateway = Gateway(
+        id=gw_id,
+        name="Firmware Test",
+        host="192.168.1.104",
+        gw_pwd="password123",
+    )
+    mock_gateway_manager.gateways[gw_id] = gateway
+    mock_gateway_manager.connections[gw_id] = mock_pypowerwall
+    mock_gateway_manager.cache[gw_id] = GatewayStatus(gateway=gateway, online=False)
+    return gw_id
+
+
+def _count(log_text, needle):
+    return log_text.count(needle)
+
+
+@pytest.mark.asyncio
+async def test_firmware_logged_once_on_first_poll(caplog, mock_gateway_manager, mock_pypowerwall):
+    """First successful poll logs the firmware exactly once."""
+    import logging
+
+    gw_id = _add_firmware_gateway(mock_gateway_manager, mock_pypowerwall)
+    mock_pypowerwall.version.return_value = "23.44.0"
+
+    with caplog.at_level(logging.INFO):
+        await mock_gateway_manager._poll_gateway(gw_id)
+        await mock_gateway_manager._poll_gateway(gw_id)
+
+    assert _count(caplog.text, "Gateway fw-test firmware: 23.44.0") == 1
+
+
+@pytest.mark.asyncio
+async def test_firmware_change_is_logged(caplog, mock_gateway_manager, mock_pypowerwall):
+    """A version change between polls logs a dated change line."""
+    import logging
+
+    gw_id = _add_firmware_gateway(mock_gateway_manager, mock_pypowerwall)
+    mock_pypowerwall.version.return_value = "23.44.0"
+    with caplog.at_level(logging.INFO):
+        await mock_gateway_manager._poll_gateway(gw_id)
+
+    caplog.clear()
+    mock_pypowerwall.version.return_value = "24.12.1"
+    with caplog.at_level(logging.INFO):
+        await mock_gateway_manager._poll_gateway(gw_id)
+
+    assert "Gateway fw-test firmware changed: 23.44.0 -> 24.12.1" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_transient_version_miss_does_not_relog(caplog, mock_gateway_manager, mock_pypowerwall):
+    """A transient version-fetch miss (None) followed by the same version logs nothing new."""
+    import logging
+
+    gw_id = _add_firmware_gateway(mock_gateway_manager, mock_pypowerwall)
+    mock_pypowerwall.version.return_value = "23.44.0"
+    with caplog.at_level(logging.INFO):
+        await mock_gateway_manager._poll_gateway(gw_id)
+
+    caplog.clear()
+    # Transient miss: version fetch times out -> None
+    mock_pypowerwall.version.return_value = None
+    with caplog.at_level(logging.INFO):
+        await mock_gateway_manager._poll_gateway(gw_id)
+    # Version returns to the same value
+    mock_pypowerwall.version.return_value = "23.44.0"
+    with caplog.at_level(logging.INFO):
+        await mock_gateway_manager._poll_gateway(gw_id)
+
+    assert _count(caplog.text, "firmware") == 0
