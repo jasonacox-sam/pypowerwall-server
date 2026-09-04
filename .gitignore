@@ -224,3 +224,14 @@ gateways.yaml
 # Time-series runtime artifacts (local runs from source)
 tmp/
 data/
+
+# OpenClaw agent scaffold files — never intended for this repo.
+# If an AI agent's working directory is ever this clone, these get
+# seeded by the agent runtime and can be swept up by a broad `git add`.
+# See PR #92 for the incident that prompted this.
+/SOUL.md
+/USER.md
+/TOOLS.md
+/IDENTITY.md
+/HEARTBEAT.md
+/.openclaw/
