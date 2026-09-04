@@ -110,6 +110,9 @@ class _SuppressWebSocketConnectionMessages(logging.Filter):
 #   uvicorn.access: "GET /api/..." request lines
 #   uvicorn.error filter: "connection open", "connection closed", WebSocket [accepted]
 if not settings.debug:
+    # Note: uvicorn.run() below re-applies its default logging config, which
+    # resets these levels — access logs are suppressed via access_log=False
+    # there. This block still covers the uvicorn.error websocket noise filter.
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.error").addFilter(_SuppressWebSocketConnectionMessages())
 logger = logging.getLogger(__name__)
@@ -917,6 +920,12 @@ For more information, visit: https://github.com/jasonacox/pypowerwall-server
             host=settings.server_host,
             port=settings.server_port,
             reload=args.reload,
+            # Suppress HTTP access logs ("GET /soe 200 OK") unless debug is
+            # enabled. uvicorn.run() applies its default logging config which
+            # resets logger levels set at import time, so passing
+            # access_log=settings.debug (False unless debug) is the reliable
+            # switch here (see discussion #86).
+            access_log=settings.debug,
         )
     except KeyboardInterrupt:
         print("\nShutting down...")
