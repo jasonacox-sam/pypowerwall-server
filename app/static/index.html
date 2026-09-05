@@ -713,6 +713,141 @@
             font-weight: 600;
             font-variant-numeric: tabular-nums;
         }
+
+        /* Powerwall Control Card (visible only when GET /control/status → enabled) */
+        .control-card {
+            grid-column: span 12;
+        }
+        .control-badge {
+            font-size: 0.8em;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 12px;
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+        }
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .control-field {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .control-label {
+            font-size: 0.75em;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .control-field select,
+        .control-field input[type="number"],
+        .control-token-row input {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            padding: 8px 10px;
+            font-size: 0.95em;
+            width: 100%;
+        }
+        .control-field select:focus,
+        .control-field input:focus,
+        .control-token-row input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        .control-reserve-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .control-reserve-row input[type="range"] {
+            flex: 1;
+            accent-color: var(--accent-green);
+        }
+        .control-reserve-row input[type="number"] {
+            width: 90px;
+            flex-shrink: 0;
+        }
+        .control-reserve-value {
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+        }
+        .control-token-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .control-token-row input {
+            flex: 1;
+        }
+        .control-btn {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 0.9em;
+            white-space: nowrap;
+        }
+        .control-btn:hover:not(:disabled) {
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+        }
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .control-icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 38px;
+        }
+        .control-icon-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+        .control-btn.primary {
+            background: rgba(63, 185, 80, 0.15);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+        .control-btn.primary:hover:not(:disabled) {
+            background: rgba(63, 185, 80, 0.25);
+            color: var(--accent-green);
+        }
+        .control-hint {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+        .control-warning {
+            display: none;
+            font-size: 0.85em;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            background: rgba(210, 153, 34, 0.12);
+            border-left: 3px solid var(--accent-yellow);
+            color: var(--text-primary);
+        }
+        .control-message {
+            font-size: 0.85em;
+            min-height: 1.4em;
+            margin-top: 12px;
+            color: var(--text-secondary);
+        }
+        .control-message.success { color: var(--accent-green); }
+        .control-message.error { color: var(--accent-red); }
         
         /* Powerwall Health Card */
         .powerwall-card {
@@ -1393,6 +1528,60 @@
                         <div class="health-value" id="server-offline">--</div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Powerwall Control (hidden until GET /control/status → enabled) -->
+            <div class="card control-card" id="control-card" style="display:none">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 20h9" fill="none"/>
+                                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" fill="none"/>
+                            </svg>
+                        </span>
+                        Powerwall Control
+                    </div>
+                    <div class="control-badge" id="control-badge">Control active</div>
+                </div>
+                <div class="control-hint" style="margin-bottom:12px">
+                    Controls the default gateway · Token from <code>PW_CONTROL_SECRET</code> required
+                    <span id="control-gateway-label"></span>
+                </div>
+                <div class="control-warning" id="control-stale-warning"></div>
+                <div class="control-warning" id="control-reserve0-warning"></div>
+                <div class="control-grid">
+                    <div class="control-field">
+                        <div class="control-label">Operating Mode</div>
+                        <select id="control-mode">
+                            <option value="self_consumption">Self-Consumption</option>
+                            <option value="backup">Backup</option>
+                            <option value="autonomous">Time-Based</option>
+                        </select>
+                        <div class="control-hint">Current: <span id="control-current-mode">--</span></div>
+                    </div>
+                    <div class="control-field">
+                        <div class="control-label">Backup Reserve (%)</div>
+                        <div class="control-reserve-row">
+                            <input type="range" id="control-reserve-slider" min="0" max="100" step="1" value="20">
+                            <input type="number" id="control-reserve-number" min="0" max="100" step="1" value="20">
+                        </div>
+                        <div class="control-hint">Current: <span id="control-current-reserve" class="control-reserve-value">--</span></div>
+                    </div>
+                    <div class="control-field">
+                        <div class="control-label">Control Token</div>
+                        <div class="control-token-row">
+                            <input type="password" id="control-token" placeholder="Paste token (PW_CONTROL_SECRET)" autocomplete="off">
+                            <button type="button" class="control-btn control-icon-btn" id="control-token-toggle" title="Show token" aria-label="Show token"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                            <button type="button" class="control-btn control-icon-btn" id="control-token-clear" title="Clear token" aria-label="Clear token">✕</button>
+                        </div>
+                        <div class="control-hint">sessionStorage only, cleared when the tab closes. Header: <code>Authorization: Bearer &lt;token&gt;</code></div>
+                    </div>
+                </div>
+                <div>
+                    <button type="button" class="control-btn primary" id="control-save">Save</button>
+                </div>
+                <div class="control-message" id="control-message"></div>
             </div>
             
             <!-- Powerwall Status -->
@@ -2859,6 +3048,309 @@
             }
         }
         
+        // Powerwall Control (GET /control/status → enabled, writes via POST /control/*)
+        const CONTROL_TOKEN_KEY = 'pw_control_token';
+        const CONTROL_EYE_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+        const CONTROL_EYE_CLOSED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+        let controlEnabled = false;
+        let controlInitial = { mode: null, reserve: null };
+        let controlDirty = false;
+        let controlSaving = false;
+
+        function getControlToken() {
+            try {
+                return sessionStorage.getItem(CONTROL_TOKEN_KEY) || '';
+            } catch (e) {
+                return document.getElementById('control-token')?.value || '';
+            }
+        }
+
+        function setControlToken(value) {
+            try {
+                if (value) sessionStorage.setItem(CONTROL_TOKEN_KEY, value);
+                else sessionStorage.removeItem(CONTROL_TOKEN_KEY);
+            } catch (e) { /* storage unavailable (private mode) — input still works */ }
+        }
+
+        function setControlMessage(text, type) {
+            const el = document.getElementById('control-message');
+            if (!el) return;
+            el.textContent = text || '';
+            el.className = 'control-message' + (type ? ' ' + type : '');
+        }
+
+        function updateReserve0Warning() {
+            const warn = document.getElementById('control-reserve0-warning');
+            if (!warn) return;
+            const reserveVal = parseInt(document.getElementById('control-reserve-number')?.value, 10);
+            const modeVal = document.getElementById('control-mode')?.value;
+            const modeChanged = controlInitial.mode !== null && modeVal !== controlInitial.mode;
+            if (Number.isInteger(reserveVal) && reserveVal === 0 && modeChanged) {
+                warn.style.display = '';
+                warn.textContent = 'Note: reserve 0 + mode change is sent as 2 calls (mode with previous reserve first, then reserve 0) — Tesla API quirk, otherwise the mode change may be dropped.';
+            } else {
+                warn.style.display = 'none';
+                warn.textContent = '';
+            }
+        }
+
+        async function loadControlStatus() {
+            const card = document.getElementById('control-card');
+            try {
+                const resp = await fetch('/control/status');
+                if (!resp.ok) throw new Error('status ' + resp.status);
+                const data = await resp.json();
+                controlEnabled = data.enabled === true;
+            } catch (e) {
+                console.log('Control status not available:', e.message);
+                controlEnabled = false;
+            }
+            if (card) card.style.display = controlEnabled ? '' : 'none';
+            if (controlEnabled) {
+                await loadControlValues(false);
+            }
+        }
+
+        async function loadControlValues(isRefresh) {
+            if (!controlEnabled) return;
+            try {
+                const resp = await fetch('/api/operation');
+                if (!resp.ok) throw new Error('Failed to load operation');
+                const op = await resp.json();
+                const mode = op.real_mode || null;
+                const reserve = (op.backup_reserve_percent !== null && op.backup_reserve_percent !== undefined)
+                    ? Math.round(Number(op.backup_reserve_percent)) : null;
+                const stale = !!op.stale;
+
+                const modeMap = {
+                    'self_consumption': 'Self-Consumption',
+                    'backup': 'Backup',
+                    'autonomous': 'Time-Based',
+                };
+                document.getElementById('control-current-mode').textContent =
+                    (modeMap[mode] || mode || '--') + (stale && mode ? ' (stale)' : '');
+                document.getElementById('control-current-reserve').textContent =
+                    (reserve !== null ? reserve + '%' : '--') + (stale && reserve !== null ? ' (stale)' : '');
+
+                const staleWarn = document.getElementById('control-stale-warning');
+                if (staleWarn) {
+                    if (stale) {
+                        const when = op.last_updated ? ' (as of ' + new Date(op.last_updated * 1000).toLocaleString() + ')' : '';
+                        staleWarn.style.display = '';
+                        staleWarn.textContent = 'Values may be stale — cloud link down, last known values' + when + '.';
+                    } else {
+                        staleWarn.style.display = 'none';
+                        staleWarn.textContent = '';
+                    }
+                }
+
+                // Default gateway label (display only, /control/* acts on the default gateway)
+                try {
+                    const ids = Object.keys(gatewayMeta || {});
+                    if (ids.length) {
+                        const defId = ids.includes('default') ? 'default' : ids[0];
+                        const defName = (gatewayMeta[defId] && gatewayMeta[defId].name) || defId;
+                        document.getElementById('control-gateway-label').textContent = ' · Default: ' + defName;
+                    }
+                } catch (e) { /* label optional */ }
+
+                if (isRefresh && controlDirty) {
+                    updateReserve0Warning();
+                    return; // Dirty check: do not overwrite user input
+                }
+                if (mode && document.getElementById('control-mode')) {
+                    document.getElementById('control-mode').value = mode;
+                }
+                if (reserve !== null) {
+                    const slider = document.getElementById('control-reserve-slider');
+                    const number = document.getElementById('control-reserve-number');
+                    if (slider) slider.value = reserve;
+                    if (number) number.value = reserve;
+                }
+                controlInitial = { mode, reserve };
+                controlDirty = false;
+                updateReserve0Warning();
+            } catch (e) {
+                console.log('Control values not available:', e.message);
+            }
+        }
+
+        async function postControl(path, body, token) {
+            const resp = await fetch('/control/' + path, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(body),
+            });
+            let payload = null;
+            try { payload = await resp.json(); } catch (e) { payload = null; }
+            return { resp, payload };
+        }
+
+        function controlErrorText(status, payload, fallback) {
+            if (payload && typeof payload.detail === 'string') return payload.detail;
+            if (status === 401) return 'Invalid token (401).';
+            if (status === 403) return 'Control disabled (403) – PW_CONTROL_SECRET not set.';
+            if (status === 400) return 'Invalid input (400).';
+            if (status === 503) return 'Gateway/cloud unreachable (503).';
+            return fallback || ('Error ' + status);
+        }
+
+        async function saveControl() {
+            if (controlSaving) return;
+            const tokenInput = document.getElementById('control-token');
+            const token = (tokenInput?.value || getControlToken() || '').trim();
+            if (!token) {
+                setControlMessage('Please enter the control token (PW_CONTROL_SECRET).', 'error');
+                return;
+            }
+            setControlToken(token);
+            const modeVal = document.getElementById('control-mode')?.value;
+            const reserveVal = parseInt(document.getElementById('control-reserve-number')?.value, 10);
+            if (!['self_consumption', 'backup', 'autonomous'].includes(modeVal)) {
+                setControlMessage('Invalid mode.', 'error');
+                return;
+            }
+            if (!Number.isInteger(reserveVal) || reserveVal < 0 || reserveVal > 100) {
+                setControlMessage('Reserve must be an integer 0–100.', 'error');
+                return;
+            }
+            const modeChanged = controlInitial.mode !== null && modeVal !== controlInitial.mode;
+            const reserveChanged = controlInitial.reserve !== null && reserveVal !== controlInitial.reserve;
+            if (controlInitial.mode === null || controlInitial.reserve === null) {
+                // Initial state unknown yet (e.g. stale null): treat fields as changed
+                // without breaking the auto-split logic below
+            }
+            const bothChanged = (modeVal !== controlInitial.mode) || (reserveVal !== controlInitial.reserve);
+            // Count null initial state as changed
+            const mChanged = modeVal !== controlInitial.mode;
+            const rChanged = reserveVal !== controlInitial.reserve;
+            if (!mChanged && !rChanged) {
+                setControlMessage('No changes.', '');
+                return;
+            }
+
+            const saveBtn = document.getElementById('control-save');
+            controlSaving = true;
+            if (saveBtn) saveBtn.disabled = true;
+            setControlMessage('Saving …', '');
+            try {
+                // Auto-split for reserve 0 + mode change (see README):
+                // mode with previous reserve first, then reserve 0 separately.
+                if (mChanged && rChanged && reserveVal === 0 && Number.isInteger(controlInitial.reserve)) {
+                    const first = await postControl('mode', { value: modeVal, level: controlInitial.reserve }, token);
+                    if (!first.resp.ok) {
+                        if (first.resp.status === 401) {
+                            setControlToken('');
+                            if (tokenInput) tokenInput.value = '';
+                        }
+                        throw new Error(controlErrorText(first.resp.status, first.payload, 'Step 1 (mode) failed.'));
+                    }
+                    const second = await postControl('reserve', { value: 0 }, token);
+                    if (!second.resp.ok) {
+                        if (second.resp.status === 401) {
+                            setControlToken('');
+                            if (tokenInput) tokenInput.value = '';
+                        }
+                        throw new Error(controlErrorText(second.resp.status, second.payload, 'Step 2 (reserve 0) failed – mode may already be set.'));
+                    }
+                } else if (mChanged && rChanged) {
+                    const r = await postControl('mode', { value: modeVal, level: reserveVal }, token);
+                    if (!r.resp.ok) {
+                        if (r.resp.status === 401) {
+                            setControlToken('');
+                            if (tokenInput) tokenInput.value = '';
+                        }
+                        throw new Error(controlErrorText(r.resp.status, r.payload, null));
+                    }
+                } else if (rChanged && !mChanged) {
+                    const r = await postControl('reserve', { value: reserveVal }, token);
+                    if (!r.resp.ok) {
+                        if (r.resp.status === 401) {
+                            setControlToken('');
+                            if (tokenInput) tokenInput.value = '';
+                        }
+                        throw new Error(controlErrorText(r.resp.status, r.payload, null));
+                    }
+                } else {
+                    const r = await postControl('mode', { value: modeVal }, token);
+                    if (!r.resp.ok) {
+                        if (r.resp.status === 401) {
+                            setControlToken('');
+                            if (tokenInput) tokenInput.value = '';
+                        }
+                        throw new Error(controlErrorText(r.resp.status, r.payload, null));
+                    }
+                }
+                void modeChanged; void reserveChanged; void bothChanged;
+                setControlMessage('Saved – takes effect after about one poll interval.', 'success');
+                controlDirty = false;
+                await loadControlValues(false);
+                await loadStats();
+            } catch (e) {
+                setControlMessage(e.message || 'Save failed.', 'error');
+            } finally {
+                controlSaving = false;
+                if (saveBtn) saveBtn.disabled = false;
+            }
+        }
+
+        function initControl() {
+            const tokenInput = document.getElementById('control-token');
+            const slider = document.getElementById('control-reserve-slider');
+            const number = document.getElementById('control-reserve-number');
+            const modeSel = document.getElementById('control-mode');
+            if (tokenInput) {
+                const saved = getControlToken();
+                if (saved) tokenInput.value = saved;
+                tokenInput.addEventListener('input', () => {
+                    setControlToken(tokenInput.value.trim());
+                    if (controlEnabled && tokenInput.value.trim()) setControlMessage('', '');
+                });
+            }
+            const toggle = document.getElementById('control-token-toggle');
+            if (toggle && tokenInput) {
+                toggle.addEventListener('click', () => {
+                    const show = tokenInput.type === 'password';
+                    tokenInput.type = show ? 'text' : 'password';
+                    toggle.innerHTML = show ? CONTROL_EYE_CLOSED : CONTROL_EYE_OPEN;
+                    toggle.title = show ? 'Hide token' : 'Show token';
+                    toggle.setAttribute('aria-label', show ? 'Hide token' : 'Show token');
+                });
+            }
+            const clearBtn = document.getElementById('control-token-clear');
+            if (clearBtn && tokenInput) {
+                clearBtn.addEventListener('click', () => {
+                    tokenInput.value = '';
+                    setControlToken('');
+                    setControlMessage('Token cleared.', '');
+                });
+            }
+            if (slider && number) {
+                slider.addEventListener('input', () => {
+                    number.value = slider.value;
+                    controlDirty = true;
+                    updateReserve0Warning();
+                });
+                number.addEventListener('input', () => {
+                    const v = parseInt(number.value, 10);
+                    if (Number.isInteger(v) && v >= 0 && v <= 100) slider.value = v;
+                    controlDirty = true;
+                    updateReserve0Warning();
+                });
+            }
+            if (modeSel) {
+                modeSel.addEventListener('change', () => {
+                    controlDirty = true;
+                    updateReserve0Warning();
+                });
+            }
+            const saveBtn = document.getElementById('control-save');
+            if (saveBtn) saveBtn.addEventListener('click', saveControl);
+        }
+
         // Initialize — load gateway metadata first so multi-gateway panels branch correctly
         async function initGateways() {
             try {
@@ -2892,10 +3384,12 @@
 
         (async () => {
             await initGateways();
+            initControl();
             connectWebSocket();
             loadAlerts();
             loadStrings();
             loadStats();
+            loadControlStatus();
             loadPowerwalls();
             loadGateways();
             loadMqtt();
@@ -2906,6 +3400,7 @@
                 loadAlerts();
                 loadStrings();
                 loadStats();
+                loadControlValues(true);
                 loadPowerwalls();
                 loadGateways();
                 loadMqtt();
