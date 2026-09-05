@@ -664,6 +664,17 @@ curl -X POST http://localhost:8675/control/mode \
 > stick). If you need mode + reserve 0, set the mode with the *current* reserve
 > level first, then set the reserve to `0` in a separate call.
 
+**Web Console (`/console`):** when `PW_CONTROL_SECRET` is set, the Console shows
+a *Powerwall Control* card (after System Health) with mode select
+(Self-Consumption/Backup/Time-Based), reserve slider + number (0–100) and a
+token field (`sessionStorage` only, `Authorization: Bearer <token>` per request).
+Availability is checked via unauthenticated `GET /control/status`
+(`{"enabled": bool}`); current values come from `GET /api/operation`. One Save
+button sends a single combined `POST /control/mode {"value": mode, "level":
+reserve}` when both changed (reserve 0 + mode change is auto-split into two
+calls, see note above), otherwise a single `/control/reserve` or `/control/mode`
+call. Controls the default gateway.
+
 ### Data Aggregation Strategy
 Multi-gateway aggregation uses **smart aggregation** that will evolve over time:
 
