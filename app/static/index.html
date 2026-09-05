@@ -3262,10 +3262,14 @@
             if (saveBtn) saveBtn.disabled = true;
             setControlMessage('Saving …', '');
             try {
-                // Auto-split for reserve 0 + mode change (see README):
-                // mode with previous reserve first, then reserve 0 separately.
-                if (mChanged && rChanged && reserveVal === 0 && Number.isInteger(controlInitial.reserve)) {
-                    const first = await postControl('mode', { value: modeVal, level: controlInitial.reserve }, token);
+                // Reserve 0 + mode change: never use the companion write with
+                // level=0 (see README note) — mode first, then reserve 0.
+                // With a known previous reserve, keep it for step 1.
+                if (mChanged && rChanged && reserveVal === 0) {
+                    const firstBody = Number.isInteger(controlInitial.reserve)
+                        ? { value: modeVal, level: controlInitial.reserve }
+                        : { value: modeVal };
+                    const first = await postControl('mode', firstBody, token);
                     if (!first.resp.ok) {
                         if (first.resp.status === 401) {
                             clearControlToken();
