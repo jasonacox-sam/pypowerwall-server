@@ -730,7 +730,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 16px;
-            margin-bottom: 16px;
+            margin-bottom: 0;
         }
         .control-field {
             background: var(--bg-secondary);
@@ -739,6 +739,12 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
+        }
+        .control-save-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 16px;
         }
         .control-label {
             font-size: 0.75em;
@@ -787,6 +793,18 @@
         }
         .control-token-row input {
             flex: 1;
+        }
+        .control-remember {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+        }
+        .control-remember input {
+            accent-color: var(--accent-green);
         }
         .control-btn {
             background: transparent;
@@ -842,8 +860,8 @@
         }
         .control-message {
             font-size: 0.85em;
-            min-height: 1.4em;
-            margin-top: 12px;
+            min-height: 1em;
+            margin-top: 8px;
             color: var(--text-secondary);
         }
         .control-message.success { color: var(--accent-green); }
@@ -1542,46 +1560,42 @@
                         </span>
                         Powerwall Control
                     </div>
-                    <div class="control-badge" id="control-badge">Control active</div>
-                </div>
-                <div class="control-hint" style="margin-bottom:12px">
-                    Controls the default gateway · Token from <code>PW_CONTROL_SECRET</code> required
-                    <span id="control-gateway-label"></span>
+                    <div class="control-badge" id="control-badge">Control enabled</div>
                 </div>
                 <div class="control-warning" id="control-stale-warning"></div>
                 <div class="control-warning" id="control-reserve0-warning"></div>
                 <div class="control-grid">
                     <div class="control-field">
-                        <div class="control-label">Operating Mode</div>
+                        <div class="control-label">Mode</div>
                         <select id="control-mode">
                             <option value="self_consumption">Self-Consumption</option>
                             <option value="backup">Backup</option>
                             <option value="autonomous">Time-Based</option>
                         </select>
-                        <div class="control-hint">Current: <span id="control-current-mode">--</span></div>
+                        <div class="control-hint">Now: <span id="control-current-mode">--</span></div>
                     </div>
                     <div class="control-field">
-                        <div class="control-label">Backup Reserve (%)</div>
+                        <div class="control-label">Backup Reserve</div>
                         <div class="control-reserve-row">
-                            <input type="range" id="control-reserve-slider" min="0" max="100" step="1" value="20">
-                            <input type="number" id="control-reserve-number" min="0" max="100" step="1" value="20">
+                            <input type="range" id="control-reserve-slider" min="0" max="100" step="1" value="20" aria-label="Backup reserve percent">
+                            <input type="number" id="control-reserve-number" min="0" max="100" step="1" value="20" aria-label="Backup reserve percent value">
                         </div>
-                        <div class="control-hint">Current: <span id="control-current-reserve" class="control-reserve-value">--</span></div>
+                        <div class="control-hint">Now: <span id="control-current-reserve" class="control-reserve-value">--</span></div>
                     </div>
                     <div class="control-field">
-                        <div class="control-label">Control Token</div>
+                        <div class="control-label">Token</div>
                         <div class="control-token-row">
-                            <input type="password" id="control-token" placeholder="Paste token (PW_CONTROL_SECRET)" autocomplete="off">
+                            <input type="password" id="control-token" placeholder="Paste your control token" autocomplete="off">
                             <button type="button" class="control-btn control-icon-btn" id="control-token-toggle" title="Show token" aria-label="Show token"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
                             <button type="button" class="control-btn control-icon-btn" id="control-token-clear" title="Clear token" aria-label="Clear token">✕</button>
                         </div>
-                        <div class="control-hint">sessionStorage only, cleared when the tab closes. Header: <code>Authorization: Bearer &lt;token&gt;</code></div>
+                        <label class="control-remember"><input type="checkbox" id="control-remember"> Remember my token on this device</label>
                     </div>
                 </div>
-                <div>
+                <div class="control-save-row" id="control-save-row" style="display:none">
                     <button type="button" class="control-btn primary" id="control-save">Save</button>
                 </div>
-                <div class="control-message" id="control-message"></div>
+                <div class="control-message" id="control-message" style="display:none"></div>
             </div>
             
             <!-- Powerwall Status -->
@@ -3050,6 +3064,7 @@
         
         // Powerwall Control (GET /control/status → enabled, writes via POST /control/*)
         const CONTROL_TOKEN_KEY = 'pw_control_token';
+        const CONTROL_REMEMBER_KEY = 'pw_control_remember';
         const CONTROL_EYE_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
         const CONTROL_EYE_CLOSED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
         let controlEnabled = false;
@@ -3057,9 +3072,14 @@
         let controlDirty = false;
         let controlSaving = false;
 
+        function isRememberToken() {
+            return document.getElementById('control-remember')?.checked === true;
+        }
+
         function getControlToken() {
             try {
-                return sessionStorage.getItem(CONTROL_TOKEN_KEY) || '';
+                return localStorage.getItem(CONTROL_TOKEN_KEY)
+                    || sessionStorage.getItem(CONTROL_TOKEN_KEY) || '';
             } catch (e) {
                 return document.getElementById('control-token')?.value || '';
             }
@@ -3067,9 +3087,23 @@
 
         function setControlToken(value) {
             try {
-                if (value) sessionStorage.setItem(CONTROL_TOKEN_KEY, value);
-                else sessionStorage.removeItem(CONTROL_TOKEN_KEY);
+                if (isRememberToken()) {
+                    if (value) localStorage.setItem(CONTROL_TOKEN_KEY, value);
+                    else localStorage.removeItem(CONTROL_TOKEN_KEY);
+                    sessionStorage.removeItem(CONTROL_TOKEN_KEY);
+                } else {
+                    if (value) sessionStorage.setItem(CONTROL_TOKEN_KEY, value);
+                    else sessionStorage.removeItem(CONTROL_TOKEN_KEY);
+                    localStorage.removeItem(CONTROL_TOKEN_KEY);
+                }
             } catch (e) { /* storage unavailable (private mode) — input still works */ }
+        }
+
+        function clearControlToken() {
+            try {
+                localStorage.removeItem(CONTROL_TOKEN_KEY);
+                sessionStorage.removeItem(CONTROL_TOKEN_KEY);
+            } catch (e) { /* ignore */ }
         }
 
         function setControlMessage(text, type) {
@@ -3077,6 +3111,12 @@
             if (!el) return;
             el.textContent = text || '';
             el.className = 'control-message' + (type ? ' ' + type : '');
+            el.style.display = text ? '' : 'none';
+        }
+
+        function updateDirtyHint() {
+            const row = document.getElementById('control-save-row');
+            if (row) row.style.display = controlDirty ? '' : 'none';
         }
 
         function updateReserve0Warning() {
@@ -3087,7 +3127,7 @@
             const modeChanged = controlInitial.mode !== null && modeVal !== controlInitial.mode;
             if (Number.isInteger(reserveVal) && reserveVal === 0 && modeChanged) {
                 warn.style.display = '';
-                warn.textContent = 'Note: reserve 0 + mode change is sent as 2 calls (mode with previous reserve first, then reserve 0) — Tesla API quirk, otherwise the mode change may be dropped.';
+                warn.textContent = 'Tip: reserve 0 plus a new mode is saved in two steps, so nothing gets lost.';
             } else {
                 warn.style.display = 'none';
                 warn.textContent = '';
@@ -3137,25 +3177,16 @@
                     if (stale) {
                         const when = op.last_updated ? ' (as of ' + new Date(op.last_updated * 1000).toLocaleString() + ')' : '';
                         staleWarn.style.display = '';
-                        staleWarn.textContent = 'Values may be stale — cloud link down, last known values' + when + '.';
+                        staleWarn.textContent = 'Might be outdated — no cloud connection.' + when + ' Showing last known values.';
                     } else {
                         staleWarn.style.display = 'none';
                         staleWarn.textContent = '';
                     }
                 }
 
-                // Default gateway label (display only, /control/* acts on the default gateway)
-                try {
-                    const ids = Object.keys(gatewayMeta || {});
-                    if (ids.length) {
-                        const defId = ids.includes('default') ? 'default' : ids[0];
-                        const defName = (gatewayMeta[defId] && gatewayMeta[defId].name) || defId;
-                        document.getElementById('control-gateway-label').textContent = ' · Default: ' + defName;
-                    }
-                } catch (e) { /* label optional */ }
-
                 if (isRefresh && controlDirty) {
                     updateReserve0Warning();
+                    updateDirtyHint();
                     return; // Dirty check: do not overwrite user input
                 }
                 if (mode && document.getElementById('control-mode')) {
@@ -3170,6 +3201,7 @@
                 controlInitial = { mode, reserve };
                 controlDirty = false;
                 updateReserve0Warning();
+                updateDirtyHint();
             } catch (e) {
                 console.log('Control values not available:', e.message);
             }
@@ -3191,10 +3223,10 @@
 
         function controlErrorText(status, payload, fallback) {
             if (payload && typeof payload.detail === 'string') return payload.detail;
-            if (status === 401) return 'Invalid token (401).';
-            if (status === 403) return 'Control disabled (403) – PW_CONTROL_SECRET not set.';
-            if (status === 400) return 'Invalid input (400).';
-            if (status === 503) return 'Gateway/cloud unreachable (503).';
+            if (status === 401) return 'Wrong token. Please enter it again.';
+            if (status === 403) return 'Control is off — no token set on the server.';
+            if (status === 400) return 'Please check your input.';
+            if (status === 503) return 'Powerwall unreachable. Please try again.';
             return fallback || ('Error ' + status);
         }
 
@@ -3203,32 +3235,25 @@
             const tokenInput = document.getElementById('control-token');
             const token = (tokenInput?.value || getControlToken() || '').trim();
             if (!token) {
-                setControlMessage('Please enter the control token (PW_CONTROL_SECRET).', 'error');
+                setControlMessage('Enter your control token first.', 'error');
                 return;
             }
             setControlToken(token);
             const modeVal = document.getElementById('control-mode')?.value;
             const reserveVal = parseInt(document.getElementById('control-reserve-number')?.value, 10);
             if (!['self_consumption', 'backup', 'autonomous'].includes(modeVal)) {
-                setControlMessage('Invalid mode.', 'error');
+                setControlMessage('That mode is unknown.', 'error');
                 return;
             }
             if (!Number.isInteger(reserveVal) || reserveVal < 0 || reserveVal > 100) {
-                setControlMessage('Reserve must be an integer 0–100.', 'error');
+                setControlMessage('Reserve must be 0–100.', 'error');
                 return;
             }
-            const modeChanged = controlInitial.mode !== null && modeVal !== controlInitial.mode;
-            const reserveChanged = controlInitial.reserve !== null && reserveVal !== controlInitial.reserve;
-            if (controlInitial.mode === null || controlInitial.reserve === null) {
-                // Initial state unknown yet (e.g. stale null): treat fields as changed
-                // without breaking the auto-split logic below
-            }
-            const bothChanged = (modeVal !== controlInitial.mode) || (reserveVal !== controlInitial.reserve);
-            // Count null initial state as changed
+            // A null initial state (e.g. values not loaded yet) counts as changed
             const mChanged = modeVal !== controlInitial.mode;
             const rChanged = reserveVal !== controlInitial.reserve;
             if (!mChanged && !rChanged) {
-                setControlMessage('No changes.', '');
+                setControlMessage('Nothing to save.', '');
                 return;
             }
 
@@ -3243,24 +3268,24 @@
                     const first = await postControl('mode', { value: modeVal, level: controlInitial.reserve }, token);
                     if (!first.resp.ok) {
                         if (first.resp.status === 401) {
-                            setControlToken('');
+                            clearControlToken();
                             if (tokenInput) tokenInput.value = '';
                         }
-                        throw new Error(controlErrorText(first.resp.status, first.payload, 'Step 1 (mode) failed.'));
+                        throw new Error(controlErrorText(first.resp.status, first.payload, 'Saving the mode failed.'));
                     }
                     const second = await postControl('reserve', { value: 0 }, token);
                     if (!second.resp.ok) {
                         if (second.resp.status === 401) {
-                            setControlToken('');
+                            clearControlToken();
                             if (tokenInput) tokenInput.value = '';
                         }
-                        throw new Error(controlErrorText(second.resp.status, second.payload, 'Step 2 (reserve 0) failed – mode may already be set.'));
+                        throw new Error(controlErrorText(second.resp.status, second.payload, 'Saving reserve 0 failed — the mode may already be saved.'));
                     }
                 } else if (mChanged && rChanged) {
                     const r = await postControl('mode', { value: modeVal, level: reserveVal }, token);
                     if (!r.resp.ok) {
                         if (r.resp.status === 401) {
-                            setControlToken('');
+                            clearControlToken();
                             if (tokenInput) tokenInput.value = '';
                         }
                         throw new Error(controlErrorText(r.resp.status, r.payload, null));
@@ -3269,7 +3294,7 @@
                     const r = await postControl('reserve', { value: reserveVal }, token);
                     if (!r.resp.ok) {
                         if (r.resp.status === 401) {
-                            setControlToken('');
+                            clearControlToken();
                             if (tokenInput) tokenInput.value = '';
                         }
                         throw new Error(controlErrorText(r.resp.status, r.payload, null));
@@ -3278,15 +3303,15 @@
                     const r = await postControl('mode', { value: modeVal }, token);
                     if (!r.resp.ok) {
                         if (r.resp.status === 401) {
-                            setControlToken('');
+                            clearControlToken();
                             if (tokenInput) tokenInput.value = '';
                         }
                         throw new Error(controlErrorText(r.resp.status, r.payload, null));
                     }
                 }
-                void modeChanged; void reserveChanged; void bothChanged;
-                setControlMessage('Saved – takes effect after about one poll interval.', 'success');
+                setControlMessage('Saved. Takes a few seconds to apply.', 'success');
                 controlDirty = false;
+                updateDirtyHint();
                 await loadControlValues(false);
                 await loadStats();
             } catch (e) {
@@ -3299,11 +3324,18 @@
 
         function initControl() {
             const tokenInput = document.getElementById('control-token');
+            const rememberBox = document.getElementById('control-remember');
             const slider = document.getElementById('control-reserve-slider');
             const number = document.getElementById('control-reserve-number');
             const modeSel = document.getElementById('control-mode');
             if (tokenInput) {
-                const saved = getControlToken();
+                let saved = '';
+                try {
+                    saved = localStorage.getItem(CONTROL_TOKEN_KEY) || '';
+                    const remember = !!saved || localStorage.getItem(CONTROL_REMEMBER_KEY) === '1';
+                    if (rememberBox) rememberBox.checked = remember;
+                    if (!saved) saved = sessionStorage.getItem(CONTROL_TOKEN_KEY) || '';
+                } catch (e) { saved = ''; }
                 if (saved) tokenInput.value = saved;
                 tokenInput.addEventListener('input', () => {
                     setControlToken(tokenInput.value.trim());
@@ -3324,8 +3356,19 @@
             if (clearBtn && tokenInput) {
                 clearBtn.addEventListener('click', () => {
                     tokenInput.value = '';
-                    setControlToken('');
+                    clearControlToken();
                     setControlMessage('Token cleared.', '');
+                });
+            }
+            if (rememberBox) {
+                rememberBox.addEventListener('change', () => {
+                    try {
+                        localStorage.setItem(CONTROL_REMEMBER_KEY, rememberBox.checked ? '1' : '0');
+                    } catch (e) { /* ignore */ }
+                    // Move any entered token to the newly selected storage
+                    const cur = tokenInput && tokenInput.value ? tokenInput.value.trim() : '';
+                    if (cur) setControlToken(cur);
+                    else clearControlToken();
                 });
             }
             if (slider && number) {
@@ -3333,22 +3376,26 @@
                     number.value = slider.value;
                     controlDirty = true;
                     updateReserve0Warning();
+                    updateDirtyHint();
                 });
                 number.addEventListener('input', () => {
                     const v = parseInt(number.value, 10);
                     if (Number.isInteger(v) && v >= 0 && v <= 100) slider.value = v;
                     controlDirty = true;
                     updateReserve0Warning();
+                    updateDirtyHint();
                 });
             }
             if (modeSel) {
                 modeSel.addEventListener('change', () => {
                     controlDirty = true;
                     updateReserve0Warning();
+                    updateDirtyHint();
                 });
             }
             const saveBtn = document.getElementById('control-save');
             if (saveBtn) saveBtn.addEventListener('click', saveControl);
+            updateDirtyHint();
         }
 
         // Initialize — load gateway metadata first so multi-gateway panels branch correctly

@@ -667,7 +667,9 @@ curl -X POST http://localhost:8675/control/mode \
 **Web Console (`/console`):** when `PW_CONTROL_SECRET` is set, the Console shows
 a *Powerwall Control* card (after System Health) with mode select
 (Self-Consumption/Backup/Time-Based), reserve slider + number (0–100) and a
-token field (`sessionStorage` only, `Authorization: Bearer <token>` per request).
+token field (kept in the tab by default, optional “Remember my token on this
+device” persists it in `localStorage`; sent as `Authorization: Bearer <token>`
+per request).
 Availability is checked via unauthenticated `GET /control/status`
 (`{"enabled": bool}`); current values come from `GET /api/operation`. One Save
 button sends a single combined `POST /control/mode {"value": mode, "level":
