@@ -3286,35 +3286,16 @@
                         throw new Error(controlErrorText(second.resp.status, second.payload, 'Saving reserve 0 failed — the mode may already be saved.'));
                     }
                 } else if (mChanged && rChanged) {
-                    if (reserveVal === 0) {
-                        // Reserve 0 + mode change: avoid companion write with level=0 (see README note).
-                        const first = await postControl('mode', { value: modeVal }, token);
-                        if (!first.resp.ok) {
-                            if (first.resp.status === 401) {
-                                clearControlToken();
-                                if (tokenInput) tokenInput.value = '';
-                            }
-                            throw new Error(controlErrorText(first.resp.status, first.payload, 'Saving the mode failed.'));
+                    // reserveVal > 0 here — the branch above splits the reserve-0 case.
+                    const r = await postControl('mode', { value: modeVal, level: reserveVal }, token);
+                    if (!r.resp.ok) {
+                        if (r.resp.status === 401) {
+                            clearControlToken();
+                            if (tokenInput) tokenInput.value = '';
                         }
-                        const second = await postControl('reserve', { value: 0 }, token);
-                        if (!second.resp.ok) {
-                            if (second.resp.status === 401) {
-                                clearControlToken();
-                                if (tokenInput) tokenInput.value = '';
-                            }
-                            throw new Error(controlErrorText(second.resp.status, second.payload, 'Saving reserve 0 failed — the mode may already be saved.'));
-                        }
-                    } else {
-                        const r = await postControl('mode', { value: modeVal, level: reserveVal }, token);
-                        if (!r.resp.ok) {
-                            if (r.resp.status === 401) {
-                                clearControlToken();
-                                if (tokenInput) tokenInput.value = '';
-                            }
-                            throw new Error(controlErrorText(r.resp.status, r.payload, null));
-                        }
+                        throw new Error(controlErrorText(r.resp.status, r.payload, null));
                     }
-                }
+                } else if (rChanged) {
                     const r = await postControl('reserve', { value: reserveVal }, token);
                     if (!r.resp.ok) {
                         if (r.resp.status === 401) {
