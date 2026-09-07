@@ -5,6 +5,10 @@
 ### [0.6.4] - Upcoming
 
 **Added:**
+- **Faster initial dashboard load** — the Console now polls alerts, strings, stats, and the other secondary endpoints every 3 seconds until every gateway completes its first successful poll, then settles into the standard 30-second cycle (30-second failsafe so an offline gateway can't keep the fast cadence running). All these endpoints are served from the server's poll cache, so this adds no traffic to the Powerwall gateway itself.
+
+**Fixed:**
+- **Alerts card no longer reports "No active alerts" before data has loaded** — the card now shows "Loading data..." until the first alerts fetch completes ("No active alerts" only appears once actual — possibly empty — alert data has arrived), and a fetch error shows "Alerts unavailable" instead of a false all-clear.
 - **Hide empty Solar Strings card** — the Console now hides the whole Solar Strings card when no string data is reported instead of showing a "No string data available" placeholder; Alerts and System Health then share the row evenly, the card reappears automatically if strings show up later, and fetch errors stay visible.
 
 ### [0.6.3] - 2026-09-06

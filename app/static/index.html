@@ -1480,7 +1480,7 @@
                 </div>
                 <div id="alert-list" class="alert-list">
                     <div class="no-alerts">
-                        No active alerts
+                        <span class="icon">⏳</span>Loading data...
                     </div>
                 </div>
             </div>
@@ -2013,7 +2013,7 @@
                 }
             } catch (e) {
                 console.log('Alerts not available:', e.message);
-                container.innerHTML = '<div class="no-alerts"><span class="icon">✅</span>No active alerts</div>';
+                container.innerHTML = '<div class="no-alerts"><span class="icon">⚠️</span>Alerts unavailable</div>';
             }
         }
 
@@ -3144,6 +3144,13 @@
                     container.innerHTML = `<div class="no-strings">No gateways configured</div>`;
                     return;
                 }
+
+                // Initial data load is complete once every gateway has finished
+                // its first successful poll — this switches secondary polling
+                // from the fast initial cadence to the standard cycle. Until
+                // then the server's gateway cache may still be cold, so empty
+                // payloads don't mean "no data exists" yet.
+                secondaryLoadComplete = Object.values(gateways).every(s => s.online === true);
                 
                 // Fetch firmware version
                 let firmwareVersion = '--';
@@ -3580,6 +3587,44 @@
             }
         }
 
+        // ---------------------------------------------------------------
+        // Secondary data polling (alerts, strings, stats, ...)
+        // After the initial burst above, poll on a fast cadence (3s) until the
+        // gateways complete their first successful poll (fresh server start,
+        // auth handshake) — during that window the API returns empty payloads
+        // because the gateway cache is still cold — then settle into the
+        // standard 30s cycle. A 30s failsafe caps the fast phase so a
+        // misconfigured/offline gateway can never keep it running. All these
+        // endpoints are served from the server's poll cache, so the fast phase
+        // adds no traffic to the Powerwall gateway itself.
+        // ---------------------------------------------------------------
+        let secondaryLoadComplete = false;
+        const SECONDARY_FAST_MS = 3000;
+        const SECONDARY_SLOW_MS = 30000;
+        const SECONDARY_FAST_MAX_MS = 30000;
+
+        function refreshSecondaryData() {
+            loadAlerts();
+            loadStrings();
+            loadStats();
+            loadControlValues(true);
+            loadPowerwalls();
+            loadGateways();
+            loadMqtt();
+            loadDailyEnergy();
+        }
+
+        function startSecondaryPolling() {
+            const fastDeadline = Date.now() + SECONDARY_FAST_MAX_MS;
+            const fastTimer = setInterval(() => {
+                refreshSecondaryData();
+                if (secondaryLoadComplete || Date.now() >= fastDeadline) {
+                    clearInterval(fastTimer);
+                    setInterval(refreshSecondaryData, SECONDARY_SLOW_MS);
+                }
+            }, SECONDARY_FAST_MS);
+        }
+
         (async () => {
             await initGateways();
             initControl();
@@ -3593,17 +3638,8 @@
             loadMqtt();
             loadDailyEnergy();
 
-            // Refresh secondary data periodically
-            setInterval(() => {
-                loadAlerts();
-                loadStrings();
-                loadStats();
-                loadControlValues(true);
-                loadPowerwalls();
-                loadGateways();
-                loadMqtt();
-                loadDailyEnergy();
-            }, 30000);
+            // Fast cadence during initial data load, then the standard cycle
+            startSecondaryPolling();
         })();
 
         console.log('PyPowerwall Server console loaded');
