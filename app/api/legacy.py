@@ -1389,9 +1389,12 @@ async def get_api_operation():
         "backup"           - Backup-Only mode
         "autonomous"       - Time-Based Control mode
 
-    Grid charging is polled via pw.get_grid_charging() with a hybrid cloud
-    fallback (TEDAPI has no local endpoint). None means unavailable.
-    Grid export policy is polled the same way via pw.get_grid_export().
+    Grid charging/export are only polled from the gateway connection when the
+    active pypowerwall client implements those getters (cloud/FleetAPI or
+    TEDAPI v1r/full). On plain local clients (hybrid TEDAPI or password-only)
+    the getters are library stubs that ERROR-log on every call (issue #114),
+    so the server skips them and uses the hybrid cloud-control fallback.
+    None means unavailable.
     """
     gateway_id = get_default_gateway()
     status = gateway_manager.get_gateway(gateway_id)

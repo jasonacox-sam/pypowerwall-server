@@ -934,3 +934,128 @@ async def test_transient_version_miss_does_not_relog(caplog, mock_gateway_manage
         await mock_gateway_manager._poll_gateway(gw_id)
 
     assert _count(caplog.text, "firmware") == 0
+
+
+# ---------------------------------------------------------------------------
+# Grid charging/export getter availability (issue #114)
+# ---------------------------------------------------------------------------
+
+def _add_grid_gateway(mock_gateway_manager, mock_pypowerwall, gw_id="grid-test"):
+    """Register a connected gateway for grid-control polling tests."""
+    from app.models.gateway import Gateway, GatewayStatus
+
+    gateway = Gateway(
+        id=gw_id,
+        name="Grid Test",
+        host="192.168.1.105",
+        gw_pwd="password123",
+    )
+    mock_gateway_manager.gateways[gw_id] = gateway
+    mock_gateway_manager.connections[gw_id] = mock_pypowerwall
+    mock_gateway_manager.cache[gw_id] = GatewayStatus(gateway=gateway, online=False)
+    return gw_id
+
+
+def test_grid_controls_supported_predicate():
+    """The availability predicate follows pypowerwall client routing."""
+    from app.core.gateway_manager import _grid_controls_supported
+
+    # Plain local clients (hybrid TEDAPI / password-only) are NOT supported
+    for mode in ("hybrid", "off"):
+        pw = Mock(tedapi_mode=mode, cloudmode=False, fleetapi=False)
+        assert _grid_controls_supported(pw) is False
+
+    # TEDAPI-backed and cloud/FleetAPI clients ARE supported
+    for mode in ("v1r", "full"):
+        pw = Mock(tedapi_mode=mode, cloudmode=False, fleetapi=False)
+        assert _grid_controls_supported(pw) is True
+    assert _grid_controls_supported(Mock(tedapi_mode="off", cloudmode=True, fleetapi=False)) is True
+    assert _grid_controls_supported(Mock(tedapi_mode="hybrid", cloudmode=False, fleetapi=True)) is True
+
+    # Defensive: missing attributes (unexpected client) -> not supported
+    assert _grid_controls_supported(object()) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tedapi_mode", ["hybrid", "off"])
+async def test_grid_getters_not_called_on_local_client(
+    mock_gateway_manager, mock_pypowerwall, tedapi_mode
+):
+    """Polling must not invoke the stub local getters that ERROR-log (#114)."""
+    mock_pypowerwall.tedapi_mode = tedapi_mode
+    gw_id = _add_grid_gateway(mock_gateway_manager, mock_pypowerwall)
+
+    await mock_gateway_manager._poll_gateway(gw_id)
+    await mock_gateway_manager._poll_gateway(gw_id)
+
+    mock_pypowerwall.get_grid_charging.assert_not_called()
+    mock_pypowerwall.get_grid_export.assert_not_called()
+    status = mock_gateway_manager.get_gateway(gw_id)
+    assert status.data.grid_charging is None
+    assert status.data.grid_export is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tedapi_mode", ["v1r", "full"])
+async def test_grid_getters_polled_when_locally_supported(
+    mock_gateway_manager, mock_pypowerwall, tedapi_mode
+):
+    """TEDAPI v1r/full clients implement the getters and are still polled."""
+    mock_pypowerwall.tedapi_mode = tedapi_mode
+    mock_pypowerwall.get_grid_charging.return_value = True
+    mock_pypowerwall.get_grid_export.return_value = "battery_ok"
+    gw_id = _add_grid_gateway(mock_gateway_manager, mock_pypowerwall)
+
+    await mock_gateway_manager._poll_gateway(gw_id)
+
+    mock_pypowerwall.get_grid_charging.assert_called_once()
+    mock_pypowerwall.get_grid_export.assert_called_once()
+    status = mock_gateway_manager.get_gateway(gw_id)
+    assert status.data.grid_charging is True
+    assert status.data.grid_export == "battery_ok"
+
+
+@pytest.mark.asyncio
+async def test_grid_getters_polled_for_cloud_gateway(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """Cloud-mode gateway connections implement the getters and are polled."""
+    mock_pypowerwall.cloudmode = True
+    mock_pypowerwall.get_grid_charging.return_value = False
+    mock_pypowerwall.get_grid_export.return_value = "pv_only"
+    gw_id = _add_grid_gateway(mock_gateway_manager, mock_pypowerwall)
+
+    await mock_gateway_manager._poll_gateway(gw_id)
+
+    mock_pypowerwall.get_grid_charging.assert_called_once()
+    mock_pypowerwall.get_grid_export.assert_called_once()
+    status = mock_gateway_manager.get_gateway(gw_id)
+    assert status.data.grid_charging is False
+    assert status.data.grid_export == "pv_only"
+
+
+@pytest.mark.asyncio
+async def test_hybrid_local_skips_stub_and_uses_cloud_fallback(
+    mock_gateway_manager, mock_pypowerwall
+):
+    """Hybrid setups get real values from cloud control without the local stubs."""
+    mock_pypowerwall.tedapi_mode = "hybrid"
+    cloud = Mock()
+    cloud.get_grid_charging.return_value = True
+    cloud.get_grid_export.return_value = "battery_ok"
+    mock_gateway_manager._cloud_control = cloud
+    gw_id = _add_grid_gateway(mock_gateway_manager, mock_pypowerwall)
+
+    try:
+        await mock_gateway_manager._poll_gateway(gw_id)
+
+        # Local stubs never invoked (no per-cycle ERROR logs), cloud queried
+        mock_pypowerwall.get_grid_charging.assert_not_called()
+        mock_pypowerwall.get_grid_export.assert_not_called()
+        cloud.get_grid_charging.assert_called_once()
+        cloud.get_grid_export.assert_called_once()
+        status = mock_gateway_manager.get_gateway(gw_id)
+        assert status.data.grid_charging is True
+        assert status.data.grid_export == "battery_ok"
+    finally:
+        mock_gateway_manager._cloud_control = None
