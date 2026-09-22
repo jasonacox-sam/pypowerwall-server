@@ -1014,8 +1014,8 @@ class GatewayManager:
 
             # Grid charging: only clients that implement the getter provide a
             # local value (cloud/FleetAPI, TEDAPI v1r/full). The plain local
-            # client's getter is a stub that logs an ERROR per call (issue
-            # #114), so it is skipped entirely — hybrid setups fall back to
+            # client's getter is a stub that logs an ERROR per call
+            # (issue #114), so it is skipped entirely — hybrid setups fall back to
             # the cloud connection below instead. Read directly (not via
             # cloud_control()) so this supplementary read leaves the
             # cloud-link health counters untouched.

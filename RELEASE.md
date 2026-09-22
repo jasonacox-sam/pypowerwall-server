@@ -2,6 +2,11 @@
 
 ## Version History
 
+### [0.6.7] - Upcoming
+
+**Fixed:**
+- **Grid charging/export polling no longer spams ERROR logs on plain local connections** — the poll loop now skips `get_grid_charging()` / `get_grid_export()` for connection modes where those getters are unimplemented local stubs that log an ERROR on every call (e.g. local-only setups after upgrading to 0.6.6). Cloud/FleetAPI and TEDAPI v1r/full connections still poll and cache the values, and hybrid setups keep the cloud fallback. `GET /api/operation` reports the fields as unavailable instead. (#114)
+
 ### [0.6.6] - 2026-09-13
 
 **Added:**
