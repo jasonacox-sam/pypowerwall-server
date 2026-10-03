@@ -93,6 +93,8 @@ import logging
 import re
 from typing import Any, Dict, Optional, Sequence
 
+from app.core.signals import SIGNAL_METRICS
+
 logger = logging.getLogger(__name__)
 
 # Matches the per-CT fields pypowerwall flattens onto each TRM--<din> vitals
@@ -103,34 +105,24 @@ _TRM_CT_FIELD_RE = re.compile(r"^TRM_CT(\d+)_(.+)$")
 # ---------------------------------------------------------------------------
 # Per-unit device signals (Powerwall temperatures and fan speeds)
 # ---------------------------------------------------------------------------
-# The signal catalogue, metric ids and per-unit extraction live in
-# app/core/signals.py - shared with the history store - so metric ids freeze
-# once, in one place. MQTT contributes only presentation: the topic suffix
-# and icon for each metric id.
-from app.core.signals import extract_unit_signals  # noqa: E402  (re-export)
-from app.core.signals import SIGNAL_METRICS
-
-# metric id -> (MQTT topic suffix, HA entity label, icon)
-_DEVICE_METRIC_PRESENTATION = {
-    "pack_temp_max": ("temperature/pack_max", "Pack Temp Max", "mdi:thermometer-high"),
-    "pack_temp_min": ("temperature/pack_min", "Pack Temp Min", "mdi:thermometer-low"),
-    "shunt_temp": ("temperature/shunt", "Shunt Temp", "mdi:thermometer"),
-    "inverter_ambient": (
-        "temperature/ambient",
-        "Inverter Ambient Temp",
-        "mdi:thermometer",
-    ),
-    "controller_ambient": (
-        "temperature/controller",
-        "Controller Ambient Temp",
-        "mdi:thermometer",
-    ),
-    "fan_a_rpm": ("fan/a/rpm", "Fan A Speed", "mdi:fan"),
-    "fan_a_duty": ("fan/a/duty", "Fan A Duty", "mdi:percent"),
-    "fan_b_rpm": ("fan/b/rpm", "Fan B Speed", "mdi:fan"),
-    "fan_b_duty": ("fan/b/duty", "Fan B Duty", "mdi:percent"),
-    "fan_rpm": ("fan/rpm", "Fan Speed", "mdi:fan"),
-    "fan_target_rpm": ("fan/target_rpm", "Fan Target Speed", "mdi:speedometer"),
+# The signal catalogue, metric ids, labels and per-unit extraction live in
+# app/core/signals.py - shared with the history store - so metric ids and
+# vocabulary freeze once, in one place. MQTT contributes only presentation:
+# the topic suffix and icon for each metric id (HA entity names come from
+# SIGNAL_METRICS labels; HA builds entity_ids from those names on first
+# discovery, so they are part of the frozen contract).
+DEVICE_METRIC_TOPICS = {
+    "pack_temp_max": ("temperature/pack_max", "mdi:thermometer-high"),
+    "pack_temp_min": ("temperature/pack_min", "mdi:thermometer-low"),
+    "shunt_temp": ("temperature/shunt", "mdi:thermometer"),
+    "inverter_ambient": ("temperature/ambient", "mdi:thermometer"),
+    "controller_ambient": ("temperature/controller", "mdi:thermometer"),
+    "fan_a_rpm": ("fan/a/rpm", "mdi:fan"),
+    "fan_a_duty": ("fan/a/duty", "mdi:percent"),
+    "fan_b_rpm": ("fan/b/rpm", "mdi:fan"),
+    "fan_b_duty": ("fan/b/duty", "mdi:percent"),
+    "fan_rpm": ("fan/rpm", "mdi:fan"),
+    "fan_target_rpm": ("fan/target_rpm", "mdi:speedometer"),
 }
 
 
@@ -342,16 +334,14 @@ def build_discovery_payloads(
     results: list[tuple[str, str]] = [
         # --- Numeric sensors ---
         sensor(
-            "battery",
-            "Battery",
+            "battery", "Battery",
             f"{data_prefix}/battery",
             unit="%",
             device_class="battery",
             state_class="measurement",
         ),
         sensor(
-            "battery_raw",
-            "Battery Raw",
+            "battery_raw", "Battery Raw",
             f"{data_prefix}/battery_raw",
             unit="%",
             state_class="measurement",
@@ -359,8 +349,7 @@ def build_discovery_payloads(
             entity_category="diagnostic",
         ),
         sensor(
-            "solar",
-            "Solar Power",
+            "solar", "Solar Power",
             f"{data_prefix}/solar",
             unit="W",
             device_class="power",
@@ -368,8 +357,7 @@ def build_discovery_payloads(
             icon="mdi:solar-power",
         ),
         sensor(
-            "grid",
-            "Grid Power",
+            "grid", "Grid Power",
             f"{data_prefix}/grid",
             unit="W",
             device_class="power",
@@ -377,8 +365,7 @@ def build_discovery_payloads(
             icon="mdi:transmission-tower",
         ),
         sensor(
-            "home",
-            "Home Load",
+            "home", "Home Load",
             f"{data_prefix}/home",
             unit="W",
             device_class="power",
@@ -386,8 +373,7 @@ def build_discovery_payloads(
             icon="mdi:home-lightning-bolt",
         ),
         sensor(
-            "powerwall",
-            "Powerwall Power",
+            "powerwall", "Powerwall Power",
             f"{data_prefix}/powerwall",
             unit="W",
             device_class="power",
@@ -395,16 +381,14 @@ def build_discovery_payloads(
             icon="mdi:battery-charging",
         ),
         sensor(
-            "reserve",
-            "Backup Reserve",
+            "reserve", "Backup Reserve",
             f"{data_prefix}/reserve",
             unit="%",
             state_class="measurement",
             icon="mdi:battery-lock",
         ),
         sensor(
-            "total_capacity",
-            "Total Battery Capacity",
+            "total_capacity", "Total Battery Capacity",
             f"{data_prefix}/total_capacity",
             unit="Wh",
             device_class="energy_storage",
@@ -412,8 +396,7 @@ def build_discovery_payloads(
             icon="mdi:battery-high",
         ),
         sensor(
-            "current_charge",
-            "Current Battery Charge",
+            "current_charge", "Current Battery Charge",
             f"{data_prefix}/current_charge",
             unit="Wh",
             device_class="energy_storage",
@@ -426,8 +409,7 @@ def build_discovery_payloads(
         # local API.  state_class=total_increasing lets the HA Energy dashboard
         # chart them directly (daily stats are derived by delta, same as PW2).
         sensor(
-            "grid_energy_imported",
-            "Grid Energy Imported",
+            "grid_energy_imported", "Grid Energy Imported",
             f"{data_prefix}/grid_energy_imported",
             unit="Wh",
             device_class="energy",
@@ -435,8 +417,7 @@ def build_discovery_payloads(
             icon="mdi:transmission-tower-import",
         ),
         sensor(
-            "grid_energy_exported",
-            "Grid Energy Exported",
+            "grid_energy_exported", "Grid Energy Exported",
             f"{data_prefix}/grid_energy_exported",
             unit="Wh",
             device_class="energy",
@@ -444,8 +425,7 @@ def build_discovery_payloads(
             icon="mdi:transmission-tower-export",
         ),
         sensor(
-            "home_energy_imported",
-            "Home Energy Consumption",
+            "home_energy_imported", "Home Energy Consumption",
             f"{data_prefix}/home_energy_imported",
             unit="Wh",
             device_class="energy",
@@ -453,8 +433,7 @@ def build_discovery_payloads(
             icon="mdi:home-lightning-bolt",
         ),
         sensor(
-            "solar_energy_exported",
-            "Solar Energy Production",
+            "solar_energy_exported", "Solar Energy Production",
             f"{data_prefix}/solar_energy_exported",
             unit="Wh",
             device_class="energy",
@@ -462,8 +441,7 @@ def build_discovery_payloads(
             icon="mdi:solar-power",
         ),
         sensor(
-            "battery_energy_imported",
-            "Battery Energy Charged",
+            "battery_energy_imported", "Battery Energy Charged",
             f"{data_prefix}/battery_energy_imported",
             unit="Wh",
             device_class="energy",
@@ -471,8 +449,7 @@ def build_discovery_payloads(
             icon="mdi:battery-charging",
         ),
         sensor(
-            "battery_energy_exported",
-            "Battery Energy Discharged",
+            "battery_energy_exported", "Battery Energy Discharged",
             f"{data_prefix}/battery_energy_exported",
             unit="Wh",
             device_class="energy",
@@ -481,8 +458,7 @@ def build_discovery_payloads(
         ),
         # --- Text sensors ---
         sensor(
-            "grid_status",
-            "Grid Status",
+            "grid_status", "Grid Status",
             f"{data_prefix}/grid_status",
             unit=None,
             device_class=None,
@@ -490,8 +466,7 @@ def build_discovery_payloads(
             icon="mdi:transmission-tower",
         ),
         sensor(
-            "mode",
-            "Operation Mode",
+            "mode", "Operation Mode",
             f"{data_prefix}/mode",
             unit=None,
             device_class=None,
@@ -499,8 +474,7 @@ def build_discovery_payloads(
             icon="mdi:cog",
         ),
         sensor(
-            "version",
-            "Firmware Version",
+            "version", "Firmware Version",
             f"{data_prefix}/version",
             unit=None,
             device_class=None,
@@ -510,8 +484,7 @@ def build_discovery_payloads(
         ),
         # --- Binary sensor ---
         binary_sensor(
-            "online",
-            "Gateway Online",
+            "online", "Gateway Online",
             f"{data_prefix}/online",
             payload_on="true",
             payload_off="false",
@@ -519,8 +492,7 @@ def build_discovery_payloads(
             icon="mdi:lan-connect",
         ),
         binary_sensor(
-            "grid_connected",
-            "Grid Connected",
+            "grid_connected", "Grid Connected",
             f"{data_prefix}/grid_connected",
             payload_on="true",
             payload_off="false",
@@ -529,8 +501,7 @@ def build_discovery_payloads(
         ),
         # --- Grid charging (bool) ---
         binary_sensor(
-            "grid_charging",
-            "Grid Charging",
+            "grid_charging", "Grid Charging",
             f"{data_prefix}/grid_charging",
             payload_on="true",
             payload_off="false",
@@ -539,8 +510,7 @@ def build_discovery_payloads(
         ),
         # --- Text sensor: grid export policy ---
         sensor(
-            "grid_export",
-            "Grid Export",
+            "grid_export", "Grid Export",
             f"{data_prefix}/grid_export",
             unit=None,
             device_class=None,
@@ -549,8 +519,7 @@ def build_discovery_payloads(
         ),
         # --- Time remaining (h) ---
         sensor(
-            "time_remaining",
-            "Time Remaining",
+            "time_remaining", "Time Remaining",
             f"{data_prefix}/time_remaining",
             unit="h",
             device_class="duration",
@@ -563,9 +532,9 @@ def build_discovery_payloads(
     if string_ids:
         strings_prefix = f"{data_prefix}/strings"
         _STRING_METRICS = [
-            ("voltage", "Voltage", "V", "voltage", "mdi:lightning-bolt"),
-            ("current", "Current", "A", "current", "mdi:current-ac"),
-            ("power", "Power", "W", "power", "mdi:solar-power-variant"),
+            ("voltage", "Voltage", "V",  "voltage", "mdi:lightning-bolt"),
+            ("current", "Current", "A",  "current", "mdi:current-ac"),
+            ("power",   "Power",   "W",  "power",   "mdi:solar-power-variant"),
         ]
         _PAIR_BASES = [("A", "B", "AB"), ("C", "D", "CD"), ("E", "F", "EF")]
 
@@ -681,15 +650,15 @@ def build_discovery_payloads(
         for serial, signals in device_signals.items():
             serial_slug = re.sub(r"[^a-z0-9]+", "_", serial.lower()).strip("_")
             for metric_id, value in signals.items():
-                entry = _DEVICE_METRIC_PRESENTATION.get(metric_id)
+                entry = DEVICE_METRIC_TOPICS.get(metric_id)
                 if entry is None or metric_id not in SIGNAL_METRICS:
                     continue
-                topic_suffix, label, icon = entry
+                topic_suffix, icon = entry
                 unit = SIGNAL_METRICS[metric_id]["unit"]
                 results.append(
                     sensor(
                         f"device_{serial_slug}_{metric_id}",
-                        f"Powerwall {serial} {label}",
+                        f"Powerwall {serial} {SIGNAL_METRICS[metric_id]['label']}",
                         f"{devices_prefix}/{serial}/{topic_suffix}",
                         unit=unit,
                         device_class="temperature" if unit == "°C" else None,

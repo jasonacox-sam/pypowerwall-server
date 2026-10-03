@@ -237,6 +237,36 @@ Sourced from `pw.vitals()`'s `TRM--{din}` blocks — requires pypowerwall
 ≥ 0.18.2 in TEDAPI modes (Basic LAN skips vitals) and a gateway with at least
 one remote meter configured; silently absent otherwise, same as solar strings.
 
+### Per-unit Powerwall temperature and fan topics
+
+One set of topics per physical Powerwall unit, keyed by that unit's serial
+number (`{serial}` — the same units as the web console's Powerwall Status
+table). Each unit publishes only the signals it actually reports: Powerwall 3
+units (and their expansion packs) carry the temperature topics and fans
+A/B, Powerwall 2/+ units carry the thermal-controller temperature and the
+single fan (rpm + target). Rounding follows the signal registry (whole rpm,
+one decimal elsewhere):
+
+| Topic | Value | Unit |
+|-------|-------|------|
+| `pypowerwall/{gw}/devices/{serial}/temperature/pack_max` | `23.4` | `°C` (PW3 battery pack max) |
+| `pypowerwall/{gw}/devices/{serial}/temperature/pack_min` | `22.1` | `°C` (PW3 battery pack min) |
+| `pypowerwall/{gw}/devices/{serial}/temperature/shunt` | `24.0` | `°C` (PW3 shunt) |
+| `pypowerwall/{gw}/devices/{serial}/temperature/ambient` | `31.2` | `°C` (PW3 inverter enclosure) |
+| `pypowerwall/{gw}/devices/{serial}/temperature/controller` | `21.5` | `°C` (PW2/+ thermal controller) |
+| `pypowerwall/{gw}/devices/{serial}/fan/a/rpm` | `1200` | `rpm` (PW3 fan A) |
+| `pypowerwall/{gw}/devices/{serial}/fan/a/duty` | `35.5` | `%` (PW3 fan A duty) |
+| `pypowerwall/{gw}/devices/{serial}/fan/b/rpm` | `1180` | `rpm` (PW3 fan B) |
+| `pypowerwall/{gw}/devices/{serial}/fan/b/duty` | `33.2` | `%` (PW3 fan B duty) |
+| `pypowerwall/{gw}/devices/{serial}/fan/rpm` | `810` | `rpm` (PW2/+ fan) |
+| `pypowerwall/{gw}/devices/{serial}/fan/target_rpm` | `900` | `rpm` (PW2/+ fan target) |
+| `pypowerwall/{gw}/devices/{serial}` | `{"pack_temp_max": 23.4, ...}` | JSON (full per-unit set) |
+
+Sourced from the existing `pw.vitals()` poll plus the `get_fan_speeds()`
+cache — no new gateway calls. Available in TEDAPI modes and PW2 local mode;
+absent in cloud-only mode, and silently absent per-signal when a unit
+doesn't report it.
+
 ---
 
 ## Home Assistant Auto-Discovery
@@ -311,6 +341,17 @@ the DIN lower-cased with non-alphanumerics replaced by `_`):
 
 Solar-string and remote-meter sensors are discovered when a poll first
 reports them, including on a later poll if the first one didn't.
+
+Per-unit temperature/fan sensors (`entity_category: diagnostic`,
+`state_class: measurement`, temperature sensors carry HA `device_class:
+temperature`), named e.g. `Powerwall TG2312H0001 Pack temp (max)`, unique ID
+`pypowerwall_{gw}_device_{serial}_{metric_id}` where `serial` is the unit
+serial and `metric_id` is one of `pack_temp_max`, `pack_temp_min`,
+`shunt_temp`, `inverter_ambient`, `controller_ambient`, `fan_a_rpm`,
+`fan_b_rpm`, `fan_a_duty`, `fan_b_duty`, `fan_rpm`, `fan_target_rpm` — the
+canonical ids from `app/core/signals.py`, frozen once released. Like
+strings and remote meters, each unit's sensors are discovered when a poll
+first reports them, including on a later poll.
 
 ---
 

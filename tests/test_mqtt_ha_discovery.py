@@ -177,12 +177,9 @@ class TestBuildDiscoveryPayloads:
         """All six lifetime energy sensors are discovered."""
         results = dict(self._payloads())
         for uid in (
-            "grid_energy_imported",
-            "grid_energy_exported",
-            "home_energy_imported",
-            "solar_energy_exported",
-            "battery_energy_imported",
-            "battery_energy_exported",
+            "grid_energy_imported", "grid_energy_exported",
+            "home_energy_imported", "solar_energy_exported",
+            "battery_energy_imported", "battery_energy_exported",
         ):
             assert f"homeassistant/sensor/pypowerwall_home_{uid}/config" in results
 
@@ -953,7 +950,7 @@ _DEVICE_VITALS = {
 }
 
 
-class TestExtractDeviceSignals:
+class TestExtractUnitSignals:
     """Unit tests for extract_unit_signals() - normalizes vitals +
     get_fan_speeds() into per-unit temperature/fan signals keyed by serial."""
 
@@ -1114,7 +1111,8 @@ class TestDeviceSignalSensors:
         )
         assert p["entity_category"] == "diagnostic"
         assert "TG2312H0001" in p["name"]
-        assert "Pack Temp Max" in p["name"]
+        # Label vocabulary comes from SIGNAL_METRICS, not a local copy
+        assert "Pack temp (max)" in p["name"]
 
         fan = payloads[
             "homeassistant/sensor/pypowerwall_home_device_tg2312h0001_fan_a_rpm/config"
@@ -1177,6 +1175,24 @@ class TestDeviceSignalSensors:
             topics = {a["topic"] for a in p["availability"]}
             assert "pw/main/availability" in topics
             assert "pw/availability" in topics
+
+
+class TestDeviceMetricTopicsCoverage:
+    """The MQTT presentation map must cover the whole registry: a metric
+    added to SIGNAL_METRICS without a topic entry would silently never
+    publish."""
+
+    def test_map_covers_registry(self):
+        from app.core.signals import SIGNAL_METRICS
+        from app.mqtt.ha_discovery import DEVICE_METRIC_TOPICS
+
+        assert set(DEVICE_METRIC_TOPICS) == set(SIGNAL_METRICS)
+
+    def test_topic_suffixes_unique(self):
+        from app.mqtt.ha_discovery import DEVICE_METRIC_TOPICS
+
+        suffixes = [entry[0] for entry in DEVICE_METRIC_TOPICS.values()]
+        assert len(suffixes) == len(set(suffixes))
 
 
 class TestDiscoverySignatureDevices:
@@ -1253,14 +1269,63 @@ class TestExtractUnitSignalsExtra:
     """Additional edge cases for the shared extraction in app/core/signals.py."""
 
     def test_fan_speeds_pvac_skipped_for_pw3_unit(self):
-        """A PW3 unit (already has TEPINV fans) ignores a same-serial PVAC
-        block in the fan_speeds payload too, not just in vitals."""
+        """A PW3 unit (has a TEPINV block) ignores a same-serial PVAC block
+        in the fan_speeds payload too, whatever the order. Keys here use
+        get_fan_speeds()'s real order: PVAC entries first, then TEPINV."""
         fan_speeds = {
-            "TEPINV--1707000-21-M--TG2312H0001": {"PCH_FanSpeed_A": 1200},
             "PVAC--1081100-38-F--TG2312H0001": {"PVAC_Fan_Speed_Actual_RPM": 700},
+            "TEPINV--1707000-21-M--TG2312H0001": {"PCH_FanSpeed_A": 1200},
         }
         result = extract_unit_signals(None, fan_speeds)
         assert result == {"TG2312H0001": {"fan_a_rpm": 1200.0}}
+
+    def test_pvac_skipped_for_pw3_unit_across_sources(self):
+        """The PW3 guard spans both sources: a TEPINV block in vitals makes
+        the same serial's PVAC block in fan_speeds contribute nothing, even
+        though vitals alone never sees the PVAC block."""
+        vitals = {
+            "TEPINV--1707000-21-M--TG2312H0001": {"PCH_FanSpeed_A": 1200},
+        }
+        fan_speeds = {
+            "PVAC--1081100-38-F--TG2312H0001": {"PVAC_Fan_Speed_Actual_RPM": 700},
+        }
+        result = extract_unit_signals(vitals, fan_speeds)
+        assert result == {"TG2312H0001": {"fan_a_rpm": 1200.0}}
+
+    def test_pw3_vitals_pv3_fan_speeds_real_order(self):
+        """pypowerwall's real shapes, real order: vitals TEPINV + fan_speeds
+        PVAC-first, same serial - the TEPINV fans win."""
+        vitals = {
+            "TEPINV--1707000-21-M--TG2312H0001": {
+                "serialNumber": "TG2312H0001",
+                "PCH_FanSpeed_A": 1200,
+                "PCH_AmbientTemp": 31.2,
+            }
+        }
+        fan_speeds = {
+            "PVAC--1081100-38-F--TG2312H0001": {"PVAC_Fan_Speed_Actual_RPM": 700},
+            "TEPINV--1707000-21-M--TG2312H0001": {"PCH_FanSpeed_A": 1200},
+        }
+        result = extract_unit_signals(vitals, fan_speeds)
+        assert result["TG2312H0001"]["fan_a_rpm"] == 1200.0
+        assert "fan_rpm" not in result["TG2312H0001"]
+
+    def test_first_writer_wins_same_serial_duplicate_blocks(self):
+        """Two same-serial blocks reporting the same metric: the first one
+        processed wins (the _apply_block guard) - deterministic output, no
+        silent overwrite from a later duplicate block."""
+        vitals = {
+            "TEPOD--1081100-38-F--TG2312H0001": {
+                "serialNumber": "TG2312H0001",
+                "HVP_PackTempMax": 25.1,
+            },
+            "TEPOD--1081100-38-F--DUPLICATE--TG2312H0001": {
+                "serialNumber": "TG2312H0001",
+                "HVP_PackTempMax": 99.9,
+            },
+        }
+        result = extract_unit_signals(vitals, None)
+        assert result == {"TG2312H0001": {"pack_temp_max": 25.1}}
 
     @pytest.mark.parametrize("serial", ["TG1/23", "TG1+23", "TG1#23", ""])
     def test_fan_speeds_serial_wildcards_skipped(self, serial):
@@ -1308,6 +1373,9 @@ class TestExtractUnitSignalsExtra:
         from app.core.signals import signal_value
 
         assert signal_value(3) == 3.0
+        # An int too large for a float raises OverflowError in float() -
+        # it must degrade to None, never propagate to the publisher.
+        assert signal_value(10**400) is None
         assert signal_value("2.5") is None  # strings are never coerced
         assert signal_value(True) is None  # bool is not a number here
         assert signal_value(float("nan")) is None
