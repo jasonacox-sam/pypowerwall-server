@@ -83,12 +83,12 @@ Topic layout
     {prefix}/{gateway_id}/devices/{serial}/temperature/shunt        float — °C (PW3 shunt)
     {prefix}/{gateway_id}/devices/{serial}/temperature/ambient      float — °C (PW3 inverter ambient)
     {prefix}/{gateway_id}/devices/{serial}/temperature/controller   float — °C (PW2/2+ TETHC ambient)
-    {prefix}/{gateway_id}/devices/{serial}/fan/a/rpm                float — rpm (PW3 fan A)
+    {prefix}/{gateway_id}/devices/{serial}/fan/a/rpm                int   — rpm (PW3 fan A)
     {prefix}/{gateway_id}/devices/{serial}/fan/a/duty               float — %   (PW3 fan A duty)
-    {prefix}/{gateway_id}/devices/{serial}/fan/b/rpm                float — rpm (PW3 fan B)
+    {prefix}/{gateway_id}/devices/{serial}/fan/b/rpm                int   — rpm (PW3 fan B)
     {prefix}/{gateway_id}/devices/{serial}/fan/b/duty               float — %   (PW3 fan B duty)
-    {prefix}/{gateway_id}/devices/{serial}/fan/rpm                  float — rpm (PW2/2+ fan)
-    {prefix}/{gateway_id}/devices/{serial}/fan/target_rpm           float — rpm (PW2/2+ fan target)
+    {prefix}/{gateway_id}/devices/{serial}/fan/rpm                  int   — rpm (PW2/2+ fan)
+    {prefix}/{gateway_id}/devices/{serial}/fan/target_rpm           int   — rpm (PW2/2+ fan target)
     {prefix}/{gateway_id}/devices/{serial}                          JSON  — full per-unit signals
     Only the signals each unit reports are published - a PW2 unit gets fan
     rpm but no duty, and an expansion pack gets pack temps but no fans.
@@ -102,7 +102,6 @@ Topic layout
     Sourced from pw.vitals()'s TRM--<din> blocks (pypowerwall >= 0.18.2 in
     TEDAPI modes; Basic LAN skips vitals) - absent when no remote meter.
 """
-
 import asyncio
 import json
 import logging
@@ -123,6 +122,9 @@ class MqttPublisher:
         # Per gateway: the optional entities (strings, remote-meter CTs)
         # already announced; a gateway key means base discovery was sent
         self._discovery_sent: Dict[str, frozenset] = {}
+        # Gateways whose per-unit signal extraction last failed: warn once
+        # (with traceback), then log at debug until an extraction succeeds.
+        self._signal_extract_failed: set = set()
         self._backoff: int = 2           # current reconnect backoff in seconds
 
     # ------------------------------------------------------------------
@@ -133,7 +135,6 @@ class MqttPublisher:
     def enabled(self) -> bool:
         """True when MQTT_HOST is configured."""
         from app.config import settings  # late import — avoids circular deps
-
         return settings.mqtt_enabled
 
     @property
@@ -214,11 +215,7 @@ class MqttPublisher:
             version = status.data.version if status.data else None
 
             string_ids = None
-            if (
-                status.data
-                and status.data.strings
-                and isinstance(status.data.strings, dict)
-            ):
+            if status.data and status.data.strings and isinstance(status.data.strings, dict):
                 string_ids = list(status.data.strings.keys())
 
             remote_meters = (
@@ -236,9 +233,7 @@ class MqttPublisher:
                 device_signals=device_signals or None,
             )
             for topic, payload in payloads:
-                await self._safe_publish(
-                    topic, payload, retain=True, qos=settings.mqtt_qos
-                )
+                await self._safe_publish(topic, payload, retain=True, qos=settings.mqtt_qos)
 
             logger.info(
                 f"MQTT HA discovery published for gateway '{gateway_id}' "
@@ -265,40 +260,46 @@ class MqttPublisher:
         # per-unit device signals not announced yet (re-sent after reconnect
         # too: _discovery_sent is cleared there). Storing the union means a
         # later snapshot without them (e.g. a vitals timeout) doesn't re-send.
-        from app.core.signals import extract_unit_signals
-        from app.mqtt.ha_discovery import discovery_signature
+        from app.core.signals import (
+            SIGNAL_GROUPS,
+            SIGNAL_METRICS,
+            extract_unit_signals,
+        )
+        from app.mqtt.ha_discovery import DEVICE_METRIC_TOPICS, discovery_signature
 
         data = status.data if status else None
         # Extract per-unit signals once per poll; discovery signature, HA
         # discovery and the per-unit topics below all reuse this result.
         # Guarded: a malformed snapshot must degrade to "no device signals",
         # never to an exception that would stop the whole gateway's MQTT.
-        try:
-            device_signals = (
-                extract_unit_signals(data.vitals, data.fan_speeds) if data else {}
-            )
-            signature = discovery_signature(
-                data.strings if data else None,
-                data.vitals if data else None,
-                device_signals,
-            )
-        except Exception as e:  # pragma: no cover - defensive
-            logger.warning(
-                "Per-unit signal extraction failed for gateway '%s': %s", gateway_id, e
-            )
-            device_signals = {}
-            signature = frozenset()
+        device_signals: dict = {}
+        if data:
+            try:
+                device_signals = extract_unit_signals(data.vitals, data.fan_speeds)
+                self._signal_extract_failed.discard(gateway_id)
+            except Exception:
+                first = gateway_id not in self._signal_extract_failed
+                self._signal_extract_failed.add(gateway_id)
+                logger.log(
+                    logging.WARNING if first else logging.DEBUG,
+                    "Per-unit signal extraction failed for gateway '%s'",
+                    gateway_id,
+                    exc_info=True,
+                )
+        signature = discovery_signature(
+            data.strings if data else None,
+            data.vitals if data else None,
+            device_signals,
+        )
         announced = self._discovery_sent.get(gateway_id)
         if announced is None or not signature <= announced:
             from app.config import settings  # late import
-
             if settings.mqtt_ha_discovery:
                 await self._publish_ha_discovery(gateway_id, status, device_signals)
             self._discovery_sent[gateway_id] = (announced or frozenset()) | signature
 
         try:
             from app.config import settings  # late import
-
             prefix = f"{settings.mqtt_topic_prefix}/{gateway_id}"
             qos = settings.mqtt_qos
             retain = settings.mqtt_retain
@@ -494,7 +495,7 @@ class MqttPublisher:
                     for key in data.strings:
                         if isinstance(key, str):
                             base = key.rstrip("0123456789")
-                            suffix = key[len(base) :]
+                            suffix = key[len(base):]
                             if base in ("A", "B", "C", "D", "E", "F"):
                                 suffixes.add(suffix)
                     for suffix in sorted(suffixes):
@@ -588,9 +589,6 @@ class MqttPublisher:
                 # and fan speeds, keyed by unit serial — the same units as
                 # the web console's Powerwall Status table). Uses the
                 # signals extracted once per poll above.
-                from app.core.signals import SIGNAL_GROUPS, SIGNAL_METRICS
-                from app.mqtt.ha_discovery import DEVICE_METRIC_TOPICS
-
                 for serial, signals in device_signals.items():
                     device_prefix = f"{prefix}/devices/{serial}"
                     rounded: dict = {}
@@ -634,11 +632,7 @@ class MqttPublisher:
                     "home": home if data.aggregates else None,
                     "powerwall": pw_power if data.aggregates else None,
                     "grid_status": data.grid_status,
-                    "grid_connected": (
-                        (data.grid_status == "UP")
-                        if data.grid_status is not None
-                        else None
-                    ),
+                    "grid_connected": (data.grid_status == "UP") if data.grid_status is not None else None,
                     "mode": data.mode,
                     "reserve": data.reserve,
                     "version": data.version,
@@ -818,9 +812,7 @@ def _extract_power(aggregates: dict, key: str) -> Optional[float]:
         return None
 
 
-def _extract_energy(
-    aggregates: Optional[dict], section: str, field: str
-) -> Optional[float]:
+def _extract_energy(aggregates: Optional[dict], section: str, field: str) -> Optional[float]:
     """Safely extract a lifetime energy accumulator (Wh) from aggregates."""
     try:
         val = aggregates[section][field]

@@ -263,8 +263,8 @@ one decimal elsewhere):
 | `pypowerwall/{gw}/devices/{serial}` | `{"pack_temp_max": 23.4, ...}` | JSON (full per-unit set) |
 
 Sourced from the existing `pw.vitals()` poll plus the `get_fan_speeds()`
-cache — no new gateway calls. Available in TEDAPI modes and PW2 local mode;
-absent in cloud-only mode, and silently absent per-signal when a unit
+cache — no new gateway calls. Available in TEDAPI modes (Basic LAN skips
+vitals); absent in cloud-only mode, and silently absent per-signal when a unit
 doesn't report it.
 
 ---
@@ -345,8 +345,9 @@ reports them, including on a later poll if the first one didn't.
 Per-unit temperature/fan sensors (`entity_category: diagnostic`,
 `state_class: measurement`, temperature sensors carry HA `device_class:
 temperature`), named e.g. `Powerwall TG2312H0001 Pack temp (max)`, unique ID
-`pypowerwall_{gw}_device_{serial}_{metric_id}` where `serial` is the unit
-serial and `metric_id` is one of `pack_temp_max`, `pack_temp_min`,
+`pypowerwall_{gw}_device_{serial_slug}_{metric_id}` where `serial_slug` is the
+unit serial lower-cased with non-alphanumerics replaced by `_` (e.g.
+`pypowerwall_default_device_tg2312h0001_pack_temp_max`) and `metric_id` is one of `pack_temp_max`, `pack_temp_min`,
 `shunt_temp`, `inverter_ambient`, `controller_ambient`, `fan_a_rpm`,
 `fan_b_rpm`, `fan_a_duty`, `fan_b_duty`, `fan_rpm`, `fan_target_rpm` — the
 canonical ids from `app/core/signals.py`, frozen once released. Like

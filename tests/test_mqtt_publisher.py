@@ -12,7 +12,6 @@ These tests use a mock MQTT client (no real broker required) and validate:
   - Connection loop reconnects after failure (backoff logic)
   - MQTT failures never propagate to caller (fire-and-forget safety)
 """
-
 import asyncio
 import json
 from typing import Any
@@ -28,10 +27,10 @@ from app.mqtt.publisher import (
     _extract_power,
 )
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def make_status(
     gateway_id: str = "test-gw",
@@ -89,7 +88,6 @@ def _status_with_battery_energy() -> GatewayStatus:
 # _extract_power unit tests (pure function — no async needed)
 # ---------------------------------------------------------------------------
 
-
 class TestExtractPower:
     def test_normal_value(self):
         agg = {"solar": {"instant_power": 1234.5}}
@@ -134,19 +132,15 @@ class TestExtractBatteryEnergy:
     def test_missing_or_invalid_values(self):
         assert _extract_battery_energy({}, "nominal_full_pack_energy") is None
         assert _extract_battery_energy(None, "nominal_full_pack_energy") is None
-        assert (
-            _extract_battery_energy(
-                {"nominal_full_pack_energy": "bad"},
-                "nominal_full_pack_energy",
-            )
-            is None
-        )
+        assert _extract_battery_energy(
+            {"nominal_full_pack_energy": "bad"},
+            "nominal_full_pack_energy",
+        ) is None
 
 
 # ---------------------------------------------------------------------------
 # MqttPublisher unit tests
 # ---------------------------------------------------------------------------
-
 
 class TestMqttPublisherDisabled:
     """Publisher should be completely inert when MQTT_HOST is not set."""
@@ -183,7 +177,6 @@ class TestMqttPublisherEnabled:
         # OLD one — after that, monkeypatching settings in any later test
         # module silently stops reaching those endpoints.
         from app.config import settings
-
         monkeypatch.setattr(settings, "mqtt_host", "localhost")
         monkeypatch.setattr(settings, "mqtt_port", 1883)
         monkeypatch.setattr(settings, "mqtt_topic_prefix", "pypowerwall")
@@ -193,7 +186,6 @@ class TestMqttPublisherEnabled:
 
     def test_enabled_when_host_set(self, monkeypatch):
         from app.config import settings as _settings
-
         # settings is a module-level singleton; patch its attribute directly
         monkeypatch.setattr(_settings, "mqtt_host", "broker.local")
         pub = MqttPublisher()
@@ -372,9 +364,7 @@ class TestMqttPublisherEnabled:
         assert published["pypowerwall/offline-gw/online"] == "false"
 
     @pytest.mark.asyncio
-    async def test_connection_loop_publishes_global_availability_on_connect(
-        self, monkeypatch
-    ):
+    async def test_connection_loop_publishes_global_availability_on_connect(self, monkeypatch):
         """On connect, global {prefix}/availability must be published as 'online'.
 
         This fixes issue #33: the discovery payload references this topic with
@@ -392,9 +382,7 @@ class TestMqttPublisherEnabled:
 
         mock_client = MagicMock()
         mock_client.publish = AsyncMock(
-            side_effect=lambda topic, payload, **kw: published.__setitem__(
-                topic, payload
-            )
+            side_effect=lambda topic, payload, **kw: published.__setitem__(topic, payload)
         )
 
         @asynccontextmanager
@@ -416,9 +404,9 @@ class TestMqttPublisherEnabled:
         ):
             await pub._connection_loop()
 
-        assert (
-            "pypowerwall/availability" in published
-        ), "Global availability topic must be published on connect (issue #33)"
+        assert "pypowerwall/availability" in published, (
+            "Global availability topic must be published on connect (issue #33)"
+        )
         assert published["pypowerwall/availability"] == "online"
 
     @pytest.mark.asyncio
@@ -429,10 +417,7 @@ class TestMqttPublisherEnabled:
         async def fake_context(*args, **kwargs):
             yield MagicMock(publish=AsyncMock())
 
-        with patch(
-            "app.mqtt.publisher.MqttPublisher._connection_loop",
-            new_callable=lambda: lambda self: asyncio.sleep(9999),
-        ):
+        with patch("app.mqtt.publisher.MqttPublisher._connection_loop", new_callable=lambda: lambda self: asyncio.sleep(9999)):
             # Start a dummy task that sleeps
             pub._shutdown = False
             pub._connection_task = asyncio.create_task(asyncio.sleep(9999))
@@ -470,7 +455,6 @@ class TestMqttStringTopics:
         # TestMqttPublisherEnabled._make_publisher — reloading app.config
         # desynchronizes the singleton across modules).
         from app.config import settings
-
         monkeypatch.setattr(settings, "mqtt_host", "localhost")
         monkeypatch.setattr(settings, "mqtt_port", 1883)
         monkeypatch.setattr(settings, "mqtt_topic_prefix", "pypowerwall")
@@ -502,30 +486,16 @@ class TestMqttStringTopics:
             strings=strings,
             timestamp=1_000_000.0,
         )
-        return GatewayStatus(
-            gateway=gateway, data=data, online=True, last_updated=1_000_000.0
-        )
+        return GatewayStatus(gateway=gateway, data=data, online=True, last_updated=1_000_000.0)
 
     @pytest.mark.asyncio
     async def test_per_string_topics_published(self, monkeypatch):
         """Individual string A-F voltage/current/power topics are published."""
         pub = self._make_publisher(monkeypatch)
-        status = self._make_status_with_strings(
-            {
-                "A": {
-                    "Voltage": 240.5,
-                    "Current": 1.5,
-                    "Power": 360.75,
-                    "State": "PV_Active",
-                },
-                "B": {
-                    "Voltage": 238.0,
-                    "Current": 1.2,
-                    "Power": 285.6,
-                    "State": "PV_Active",
-                },
-            }
-        )
+        status = self._make_status_with_strings({
+            "A": {"Voltage": 240.5, "Current": 1.5, "Power": 360.75, "State": "PV_Active"},
+            "B": {"Voltage": 238.0, "Current": 1.2, "Power": 285.6, "State": "PV_Active"},
+        })
         await pub.publish_gateway("test-gw", status)
 
         published = {c.args[0]: c.args[1] for c in pub._client.publish.call_args_list}
@@ -544,11 +514,9 @@ class TestMqttStringTopics:
     async def test_per_string_json_topic(self, monkeypatch):
         """Full string data is published as JSON on the bare string topic."""
         pub = self._make_publisher(monkeypatch)
-        status = self._make_status_with_strings(
-            {
-                "A": {"Voltage": 240.5, "Current": 1.5, "Power": 360.75},
-            }
-        )
+        status = self._make_status_with_strings({
+            "A": {"Voltage": 240.5, "Current": 1.5, "Power": 360.75},
+        })
         await pub.publish_gateway("test-gw", status)
 
         published = {c.args[0]: c.args[1] for c in pub._client.publish.call_args_list}
@@ -561,16 +529,14 @@ class TestMqttStringTopics:
     async def test_paired_rollups_ab_cd_ef(self, monkeypatch):
         """PW3 paired-string rollups (AB, CD, EF) are published with summed current/power."""
         pub = self._make_publisher(monkeypatch)
-        status = self._make_status_with_strings(
-            {
-                "A": {"Voltage": 240.0, "Current": 1.5, "Power": 360.0},
-                "B": {"Voltage": 240.0, "Current": 1.25, "Power": 300.0},
-                "C": {"Voltage": 238.0, "Current": 2.0, "Power": 476.0},
-                "D": {"Voltage": 238.0, "Current": 1.0, "Power": 238.0},
-                "E": {"Voltage": 236.0, "Current": 0.5, "Power": 118.0},
-                "F": {"Voltage": 236.0, "Current": 0.8, "Power": 188.8},
-            }
-        )
+        status = self._make_status_with_strings({
+            "A": {"Voltage": 240.0, "Current": 1.5, "Power": 360.0},
+            "B": {"Voltage": 240.0, "Current": 1.25, "Power": 300.0},
+            "C": {"Voltage": 238.0, "Current": 2.0, "Power": 476.0},
+            "D": {"Voltage": 238.0, "Current": 1.0, "Power": 238.0},
+            "E": {"Voltage": 236.0, "Current": 0.5, "Power": 118.0},
+            "F": {"Voltage": 236.0, "Current": 0.8, "Power": 188.8},
+        })
         await pub.publish_gateway("test-gw", status)
 
         published = {c.args[0]: c.args[1] for c in pub._client.publish.call_args_list}
@@ -605,12 +571,10 @@ class TestMqttStringTopics:
     async def test_partial_strings_only_publishes_available_pairs(self, monkeypatch):
         """Only AB is published when only A and B strings exist."""
         pub = self._make_publisher(monkeypatch)
-        status = self._make_status_with_strings(
-            {
-                "A": {"Voltage": 240.0, "Current": 1.5, "Power": 360.0},
-                "B": {"Voltage": 240.0, "Current": 1.0, "Power": 240.0},
-            }
-        )
+        status = self._make_status_with_strings({
+            "A": {"Voltage": 240.0, "Current": 1.5, "Power": 360.0},
+            "B": {"Voltage": 240.0, "Current": 1.0, "Power": 240.0},
+        })
         await pub.publish_gateway("test-gw", status)
 
         published = {c.args[0]: c.args[1] for c in pub._client.publish.call_args_list}
@@ -623,12 +587,10 @@ class TestMqttStringTopics:
     async def test_single_string_in_pair_no_rollup(self, monkeypatch):
         """When only one string of a pair exists, no rollup is published."""
         pub = self._make_publisher(monkeypatch)
-        status = self._make_status_with_strings(
-            {
-                "A": {"Voltage": 240.0, "Current": 1.5, "Power": 360.0},
-                # B is missing — AB rollup must NOT be published
-            }
-        )
+        status = self._make_status_with_strings({
+            "A": {"Voltage": 240.0, "Current": 1.5, "Power": 360.0},
+            # B is missing — AB rollup must NOT be published
+        })
         await pub.publish_gateway("test-gw", status)
 
         published = {c.args[0]: c.args[1] for c in pub._client.publish.call_args_list}
@@ -643,24 +605,22 @@ class TestMqttStringTopics:
     async def test_multi_pw3_single_gateway_rollups(self, monkeypatch):
         """Multi-PW3 on single gateway: A-F and A1-F1 each get paired rollups."""
         pub = self._make_publisher(monkeypatch)
-        status = self._make_status_with_strings(
-            {
-                # First PW3
-                "A": {"Voltage": 284.0, "Current": 1.0, "Power": 284.0},
-                "B": {"Voltage": 284.0, "Current": 0.95, "Power": 269.8},
-                "C": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
-                "D": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
-                "E": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
-                "F": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
-                # Second PW3
-                "A1": {"Voltage": 310.0, "Current": 0.2, "Power": 62.0},
-                "B1": {"Voltage": 310.0, "Current": 0.2, "Power": 62.0},
-                "C1": {"Voltage": 388.0, "Current": 0.25, "Power": 97.0},
-                "D1": {"Voltage": 388.0, "Current": 0.15, "Power": 58.2},
-                "E1": {"Voltage": 422.0, "Current": 1.2, "Power": 506.4},
-                "F1": {"Voltage": 422.0, "Current": 1.2, "Power": 506.4},
-            }
-        )
+        status = self._make_status_with_strings({
+            # First PW3
+            "A": {"Voltage": 284.0, "Current": 1.0, "Power": 284.0},
+            "B": {"Voltage": 284.0, "Current": 0.95, "Power": 269.8},
+            "C": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
+            "D": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
+            "E": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
+            "F": {"Voltage": 0.0, "Current": 0.0, "Power": 0.0},
+            # Second PW3
+            "A1": {"Voltage": 310.0, "Current": 0.2, "Power": 62.0},
+            "B1": {"Voltage": 310.0, "Current": 0.2, "Power": 62.0},
+            "C1": {"Voltage": 388.0, "Current": 0.25, "Power": 97.0},
+            "D1": {"Voltage": 388.0, "Current": 0.15, "Power": 58.2},
+            "E1": {"Voltage": 422.0, "Current": 1.2, "Power": 506.4},
+            "F1": {"Voltage": 422.0, "Current": 1.2, "Power": 506.4},
+        })
         await pub.publish_gateway("test-gw", status)
 
         published = {c.args[0]: c.args[1] for c in pub._client.publish.call_args_list}
@@ -690,7 +650,6 @@ class TestMqttStringTopics:
 # ---------------------------------------------------------------------------
 # Lifetime energy accumulator topics (Wh) — pypowerwall>=0.16.5 PW3 overlay
 # ---------------------------------------------------------------------------
-
 
 def _status_with_energy() -> GatewayStatus:
     """Status whose aggregates carry lifetime energy fields (PW3, pypowerwall>=0.16.5)."""
@@ -971,9 +930,7 @@ class TestLifetimeEnergyTopics:
 class TestExtractEnergy:
     def test_normal_value(self):
         agg = {"site": {"energy_imported": 4902666.25}}
-        assert _extract_energy(agg, "site", "energy_imported") == pytest.approx(
-            4902666.25
-        )
+        assert _extract_energy(agg, "site", "energy_imported") == pytest.approx(4902666.25)
 
     def test_zero_is_valid(self):
         agg = {"site": {"energy_imported": 0}}
@@ -1356,7 +1313,9 @@ class TestMqttDeviceSignalTopics:
         data = json.loads(published[prefix])
         assert data["pack_temp_max"] == 23.4
         assert data["pack_temp_min"] == 0.0
-        assert data["fan_a_rpm"] == 1398  # int, not 1398.0
+        assert data["fan_a_rpm"] == 1398
+        assert isinstance(data["fan_a_rpm"], int)  # not 1398.0
+        assert "1398.0" not in published[prefix]
         assert not str(data["pack_temp_min"]).startswith("-")
 
     @pytest.mark.asyncio
@@ -1380,6 +1339,76 @@ class TestMqttDeviceSignalTopics:
         assert "pypowerwall/test-gw/online" in published
         assert "pypowerwall/test-gw/availability" in published
         assert not [t for t in published if "/devices/" in t]
+
+    @pytest.mark.asyncio
+    async def test_extraction_failure_does_not_stop_publishing(
+        self, monkeypatch, caplog
+    ):
+        """If extraction itself raises, the gateway still publishes its base
+        topics with no device topics, discovery isn't re-sent on the next
+        poll, and the failure is logged once at WARNING (with traceback),
+        then at DEBUG until an extraction succeeds again."""
+        import logging
+
+        import app.core.signals as signals_mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "mqtt_ha_discovery", True)
+        monkeypatch.setattr(settings, "mqtt_ha_prefix", "homeassistant")
+
+        def boom(vitals, fan_speeds=None):
+            raise KeyError("malformed snapshot")
+
+        monkeypatch.setattr(signals_mod, "extract_unit_signals", boom)
+        pub = self._make_publisher(monkeypatch)
+        status = self._make_status_with_vitals(
+            {"TEPOD--1081100-38-F--TG2312H0001": {"HVP_PackTempMax": 23.5}}
+        )
+        caplog.set_level(logging.DEBUG, logger="app.mqtt.publisher")
+
+        await pub.publish_gateway("test-gw", status)
+        topics = [c.args[0] for c in pub._client.publish.call_args_list]
+        for name in ("battery", "online", "status", "availability"):
+            assert f"pypowerwall/test-gw/{name}" in topics
+        assert not [t for t in topics if "/devices/" in t or "_device_" in t]
+        discovery = [t for t in topics if t.startswith("homeassistant/")]
+        assert discovery  # base entities still discovered
+
+        await pub.publish_gateway("test-gw", status)
+        topics = [c.args[0] for c in pub._client.publish.call_args_list]
+        assert [t for t in topics if t.startswith("homeassistant/")] == discovery
+
+        failures = [
+            r for r in caplog.records if "signal extraction failed" in r.getMessage()
+        ]
+        assert [r.levelno for r in failures] == [logging.WARNING, logging.DEBUG]
+        assert failures[0].exc_info is not None
+
+        # A successful extraction re-arms the one-time warning
+        monkeypatch.setattr(signals_mod, "extract_unit_signals", lambda v, f=None: {})
+        await pub.publish_gateway("test-gw", status)
+        monkeypatch.setattr(signals_mod, "extract_unit_signals", boom)
+        await pub.publish_gateway("test-gw", status)
+        failures = [
+            r for r in caplog.records if "signal extraction failed" in r.getMessage()
+        ]
+        assert [r.levelno for r in failures][-1] == logging.WARNING
+
+    @pytest.mark.asyncio
+    async def test_device_topics_follow_retain_and_qos(self, monkeypatch):
+        """Per-unit topics use the configured retain flag and QoS like every
+        other state topic."""
+        pub = self._make_publisher(monkeypatch)
+        status = self._make_status_with_vitals(
+            {"TEPOD--1081100-38-F--TG2312H0001": {"HVP_PackTempMax": 23.5}}
+        )
+        await pub.publish_gateway("test-gw", status)
+        device_calls = [
+            c for c in pub._client.publish.call_args_list if "/devices/" in c.args[0]
+        ]
+        assert len(device_calls) == 2  # pack_max topic + per-unit JSON
+        for c in device_calls:
+            assert c.kwargs == {"qos": 1, "retain": True}
 
     @pytest.mark.asyncio
     async def test_late_fan_speeds_rediscovery(self, monkeypatch):

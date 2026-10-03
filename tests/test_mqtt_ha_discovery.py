@@ -11,7 +11,6 @@ These tests validate:
   - Discovery is sent exactly once per gateway per connection (not on every poll)
   - Discovery is re-sent after a reconnect (_discovery_sent cleared)
 """
-
 import asyncio
 import json
 from unittest.mock import AsyncMock, patch
@@ -36,7 +35,6 @@ BASE_ENTITY_COUNT = 23
 # Helpers (shared with test_mqtt_publisher.py pattern)
 # ---------------------------------------------------------------------------
 
-
 def make_status(
     gateway_id: str = "test-gw",
     gateway_name: str = "Test Gateway",
@@ -45,9 +43,7 @@ def make_status(
     soe: float = 73.6842105263,
     soe_raw: float = 75.0,
 ) -> GatewayStatus:
-    gateway = Gateway(
-        id=gateway_id, name=gateway_name, host="192.168.91.1", online=online
-    )
+    gateway = Gateway(id=gateway_id, name=gateway_name, host="192.168.91.1", online=online)
     data = PowerwallData(
         soe_raw=soe_raw,
         soe=soe,
@@ -63,25 +59,17 @@ def make_status(
         version=version,
         timestamp=1_000_000.0,
     )
-    return GatewayStatus(
-        gateway=gateway, data=data, online=online, last_updated=1_000_000.0
-    )
+    return GatewayStatus(gateway=gateway, data=data, online=online, last_updated=1_000_000.0)
 
 
 # ---------------------------------------------------------------------------
 # Unit tests for build_discovery_payloads()
 # ---------------------------------------------------------------------------
 
-
 class TestBuildDiscoveryPayloads:
-    def _payloads(
-        self,
-        gateway_id="home",
-        gateway_name="Home Powerwall",
-        prefix="pypowerwall",
-        ha_prefix="homeassistant",
-        version="23.44.0",
-    ) -> list[tuple[str, dict]]:
+    def _payloads(self, gateway_id="home", gateway_name="Home Powerwall",
+                  prefix="pypowerwall", ha_prefix="homeassistant",
+                  version="23.44.0") -> list[tuple[str, dict]]:
         raw = build_discovery_payloads(
             gateway_id=gateway_id,
             gateway_name=gateway_name,
@@ -119,9 +107,7 @@ class TestBuildDiscoveryPayloads:
             assert topic.endswith("/config"), f"Topic should end with /config: {topic}"
 
     def test_device_block_on_every_payload(self):
-        results = self._payloads(
-            gateway_id="cabin", gateway_name="Cabin Powerwall", version="24.0.1"
-        )
+        results = self._payloads(gateway_id="cabin", gateway_name="Cabin Powerwall", version="24.0.1")
         for topic, payload in results:
             assert "device" in payload, f"Missing device block: {topic}"
             device = payload["device"]
@@ -363,31 +349,14 @@ class TestBuildDiscoveryPayloads:
         # base + 2×3 per-string + 1 pair (AB) × 3
         assert len(results) == BASE_ENTITY_COUNT + 6 + 3
         # AB pair present
-        assert (
-            "homeassistant/sensor/pypowerwall_home_string_ab_voltage/config" in payloads
-        )
+        assert "homeassistant/sensor/pypowerwall_home_string_ab_voltage/config" in payloads
         # CD and EF pairs must NOT be present (C/D/E/F not in string_ids)
-        assert (
-            "homeassistant/sensor/pypowerwall_home_string_cd_power/config"
-            not in payloads
-        )
+        assert "homeassistant/sensor/pypowerwall_home_string_cd_power/config" not in payloads
 
     def test_string_sensors_multi_pw3(self):
         """Multi-PW3 numbered strings (A1–F2) generate correct paired rollups."""
-        string_ids = [
-            "A1",
-            "B1",
-            "C1",
-            "D1",
-            "E1",
-            "F1",
-            "A2",
-            "B2",
-            "C2",
-            "D2",
-            "E2",
-            "F2",
-        ]
+        string_ids = ["A1", "B1", "C1", "D1", "E1", "F1",
+                      "A2", "B2", "C2", "D2", "E2", "F2"]
         results = build_discovery_payloads(
             gateway_id="home",
             gateway_name="Home",
@@ -399,13 +368,8 @@ class TestBuildDiscoveryPayloads:
         # base + 12×3 per-string + 6 pairs × 3
         assert len(results) == BASE_ENTITY_COUNT + 36 + 18
         # Spot-check numbered pair AB1
-        assert (
-            "homeassistant/sensor/pypowerwall_home_string_ab1_voltage/config"
-            in payloads
-        )
-        assert (
-            "homeassistant/sensor/pypowerwall_home_string_ab2_power/config" in payloads
-        )
+        assert "homeassistant/sensor/pypowerwall_home_string_ab1_voltage/config" in payloads
+        assert "homeassistant/sensor/pypowerwall_home_string_ab2_power/config" in payloads
 
     def test_no_remote_meter_sensors_when_absent(self):
         """When remote_meters is not supplied, no remote-meter sensors are added."""
@@ -595,11 +559,9 @@ class TestExtractRemoteMeters:
 # Integration tests for MqttPublisher._publish_ha_discovery()
 # ---------------------------------------------------------------------------
 
-
 class TestPublisherHaDiscovery:
     def _make_publisher(self, monkeypatch) -> MqttPublisher:
         from app.config import settings as _settings
-
         monkeypatch.setattr(_settings, "mqtt_host", "localhost")
         monkeypatch.setattr(_settings, "mqtt_topic_prefix", "pypowerwall")
         monkeypatch.setattr(_settings, "mqtt_ha_prefix", "homeassistant")
@@ -675,7 +637,6 @@ class TestPublisherHaDiscovery:
         """No discovery payloads when MQTT_HA_DISCOVERY=false."""
         pub = self._make_publisher(monkeypatch)
         from app.config import settings as _settings
-
         monkeypatch.setattr(_settings, "mqtt_ha_discovery", False)
         mock_client = AsyncMock()
         pub._client = mock_client
@@ -1120,6 +1081,29 @@ class TestDeviceSignalSensors:
         assert fan["unit_of_measurement"] == "rpm"
         assert "device_class" not in fan
         assert fan["state_topic"] == "pypowerwall/home/devices/TG2312H0001/fan/a/rpm"
+        # Icons come from DEVICE_METRIC_TOPICS
+        assert p["icon"] == "mdi:thermometer-high"
+        assert fan["icon"] == "mdi:fan"
+
+    def test_serial_slug_in_unique_id(self):
+        """unique_id uses the serial lower-cased, non-alphanumerics folded to
+        "_" and trimmed; the state topic keeps the serial as reported."""
+        results = build_discovery_payloads(
+            gateway_id="home",
+            gateway_name="Home",
+            topic_prefix="pypowerwall",
+            ha_prefix="homeassistant",
+            device_signals={"-TG-1.A-": {"pack_temp_max": 23.5}},
+        )
+        payloads = {t: json.loads(p) for t, p in results if "_device_" in t}
+        assert list(payloads) == [
+            "homeassistant/sensor/pypowerwall_home_device_tg_1_a_pack_temp_max/config"
+        ]
+        p = next(iter(payloads.values()))
+        assert p["unique_id"] == "pypowerwall_home_device_tg_1_a_pack_temp_max"
+        assert (
+            p["state_topic"] == "pypowerwall/home/devices/-TG-1.A-/temperature/pack_max"
+        )
 
     def test_pw2_unit_sensors(self):
         """A PW2 unit: controller temp + fan speed/target, no duty sensors."""

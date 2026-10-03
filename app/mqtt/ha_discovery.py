@@ -87,7 +87,6 @@ References
     https://www.home-assistant.io/integrations/sensor.mqtt/
     https://www.home-assistant.io/integrations/binary_sensor.mqtt/
 """
-
 import json
 import logging
 import re
@@ -258,16 +257,8 @@ def build_discovery_payloads(
 
     def avail() -> list:
         return [
-            {
-                "topic": avail_topic,
-                "payload_available": "online",
-                "payload_not_available": "offline",
-            },
-            {
-                "topic": global_avail_topic,
-                "payload_available": "online",
-                "payload_not_available": "offline",
-            },
+            {"topic": avail_topic, "payload_available": "online", "payload_not_available": "offline"},
+            {"topic": global_avail_topic, "payload_available": "online", "payload_not_available": "offline"},
         ]
 
     def sensor(
@@ -543,18 +534,16 @@ def build_discovery_payloads(
             s_prefix = f"{strings_prefix}/{sid}"
             sid_slug = sid.lower()
             for metric, label, unit, dc, icon in _STRING_METRICS:
-                results.append(
-                    sensor(
-                        f"string_{sid_slug}_{metric}",
-                        f"String {sid} {label}",
-                        f"{s_prefix}/{metric}",
-                        unit=unit,
-                        device_class=dc,
-                        state_class="measurement",
-                        icon=icon,
-                        entity_category="diagnostic",
-                    )
-                )
+                results.append(sensor(
+                    f"string_{sid_slug}_{metric}",
+                    f"String {sid} {label}",
+                    f"{s_prefix}/{metric}",
+                    unit=unit,
+                    device_class=dc,
+                    state_class="measurement",
+                    icon=icon,
+                    entity_category="diagnostic",
+                ))
 
         # Paired-string rollup sensors (AB, CD, EF + numbered variants)
         sid_set = set(string_ids)
@@ -562,7 +551,7 @@ def build_discovery_payloads(
         for sid in string_ids:
             base = sid.rstrip("0123456789")
             if base in ("A", "B", "C", "D", "E", "F"):
-                suffixes.add(sid[len(base) :])
+                suffixes.add(sid[len(base):])
 
         for suffix in sorted(suffixes):
             for first, second, pair_base in _PAIR_BASES:
@@ -574,18 +563,16 @@ def build_discovery_payloads(
                 p_prefix = f"{strings_prefix}/{pair_name}"
                 pair_slug = pair_name.lower()
                 for metric, label, unit, dc, icon in _STRING_METRICS:
-                    results.append(
-                        sensor(
-                            f"string_{pair_slug}_{metric}",
-                            f"String {pair_name} {label}",
-                            f"{p_prefix}/{metric}",
-                            unit=unit,
-                            device_class=dc,
-                            state_class="measurement",
-                            icon=icon,
-                            entity_category="diagnostic",
-                        )
-                    )
+                    results.append(sensor(
+                        f"string_{pair_slug}_{metric}",
+                        f"String {pair_name} {label}",
+                        f"{p_prefix}/{metric}",
+                        unit=unit,
+                        device_class=dc,
+                        state_class="measurement",
+                        icon=icon,
+                        entity_category="diagnostic",
+                    ))
 
     # --- Remote meter sensors (Tesla wireless CT meters, one or more CTs
     # per meter, one or more meters per gateway) ---
