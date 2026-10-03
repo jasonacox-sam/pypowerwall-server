@@ -87,6 +87,7 @@ References
     https://www.home-assistant.io/integrations/sensor.mqtt/
     https://www.home-assistant.io/integrations/binary_sensor.mqtt/
 """
+import hashlib
 import json
 import logging
 import re
@@ -123,6 +124,22 @@ DEVICE_METRIC_TOPICS = {
     "fan_rpm": ("fan/rpm", "mdi:fan"),
     "fan_target_rpm": ("fan/target_rpm", "mdi:speedometer"),
 }
+
+
+def _serial_slug(serial: str) -> str:
+    """Stable, collision-free unique_id fragment for a unit serial.
+
+    Tesla serials are upper-case alphanumeric and map to their lower-case
+    form (TG2312H0001 -> tg2312h0001). Any other accepted serial is slugged
+    and gets a short hash of the exact serial appended, so two distinct
+    serials (e.g. "TG-1.A" and "TG_1-A") can never share an HA entity; the
+    "_" in that form also keeps it apart from every plain serial.
+    """
+    if re.fullmatch(r"[A-Z0-9]+", serial):
+        return serial.lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", serial.lower()).strip("_")
+    digest = hashlib.sha1(serial.encode("utf-8")).hexdigest()[:8]
+    return f"{slug}_{digest}"
 
 
 def extract_remote_meters(
@@ -635,7 +652,7 @@ def build_discovery_payloads(
     if device_signals:
         devices_prefix = f"{data_prefix}/devices"
         for serial, signals in device_signals.items():
-            serial_slug = re.sub(r"[^a-z0-9]+", "_", serial.lower()).strip("_")
+            serial_slug = _serial_slug(serial)
             for metric_id, value in signals.items():
                 entry = DEVICE_METRIC_TOPICS.get(metric_id)
                 if entry is None or metric_id not in SIGNAL_METRICS:

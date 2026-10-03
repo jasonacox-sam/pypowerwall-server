@@ -346,8 +346,10 @@ Per-unit temperature/fan sensors (`entity_category: diagnostic`,
 `state_class: measurement`, temperature sensors carry HA `device_class:
 temperature`), named e.g. `Powerwall TG2312H0001 Pack temp (max)`, unique ID
 `pypowerwall_{gw}_device_{serial_slug}_{metric_id}` where `serial_slug` is the
-unit serial lower-cased with non-alphanumerics replaced by `_` (e.g.
-`pypowerwall_default_device_tg2312h0001_pack_temp_max`) and `metric_id` is one of `pack_temp_max`, `pack_temp_min`,
+unit serial lower-cased (e.g. `pypowerwall_default_device_tg2312h0001_pack_temp_max`;
+a serial that isn't plain upper-case alphanumeric is slugged with `_` and gets
+a short hash of the exact serial appended, so two units never share an
+entity) and `metric_id` is one of `pack_temp_max`, `pack_temp_min`,
 `shunt_temp`, `inverter_ambient`, `controller_ambient`, `fan_a_rpm`,
 `fan_b_rpm`, `fan_a_duty`, `fan_b_duty`, `fan_rpm`, `fan_target_rpm` — the
 canonical ids from `app/core/signals.py`, frozen once released. Like

@@ -1086,24 +1086,48 @@ class TestDeviceSignalSensors:
         assert fan["icon"] == "mdi:fan"
 
     def test_serial_slug_in_unique_id(self):
-        """unique_id uses the serial lower-cased, non-alphanumerics folded to
-        "_" and trimmed; the state topic keeps the serial as reported."""
+        """A Tesla serial (upper-case alphanumeric) appears lower-cased in the
+        unique_id; anything else is slugged ("_", trimmed) with a short hash
+        of the exact serial. State topics keep the serial as reported."""
+        import hashlib
+
         results = build_discovery_payloads(
             gateway_id="home",
             gateway_name="Home",
             topic_prefix="pypowerwall",
             ha_prefix="homeassistant",
-            device_signals={"-TG-1.A-": {"pack_temp_max": 23.5}},
+            device_signals={
+                "TG2312H0001": {"pack_temp_max": 23.5},
+                "-TG-1.A-": {"pack_temp_max": 23.5},
+            },
         )
         payloads = {t: json.loads(p) for t, p in results if "_device_" in t}
-        assert list(payloads) == [
-            "homeassistant/sensor/pypowerwall_home_device_tg_1_a_pack_temp_max/config"
-        ]
-        p = next(iter(payloads.values()))
-        assert p["unique_id"] == "pypowerwall_home_device_tg_1_a_pack_temp_max"
-        assert (
-            p["state_topic"] == "pypowerwall/home/devices/-TG-1.A-/temperature/pack_max"
+        ids = {p["state_topic"]: p["unique_id"] for p in payloads.values()}
+        digest = hashlib.sha1(b"-TG-1.A-").hexdigest()[:8]
+        assert ids == {
+            "pypowerwall/home/devices/TG2312H0001/temperature/pack_max": (
+                "pypowerwall_home_device_tg2312h0001_pack_temp_max"
+            ),
+            "pypowerwall/home/devices/-TG-1.A-/temperature/pack_max": (
+                f"pypowerwall_home_device_tg_1_a_{digest}_pack_temp_max"
+            ),
+        }
+        for topic, p in payloads.items():
+            assert topic == f"homeassistant/sensor/{p['unique_id']}/config"
+
+    def test_serial_slugs_never_collide(self):
+        """Serials that would slug alike (punctuation, case) still get
+        distinct unique_ids, so one unit can't overwrite another's entity."""
+        serials = ["TG-1.A", "TG_1-A", "TG1A", "tg1a", "Tg1A"]
+        results = build_discovery_payloads(
+            gateway_id="home",
+            gateway_name="Home",
+            topic_prefix="pypowerwall",
+            ha_prefix="homeassistant",
+            device_signals={s: {"pack_temp_max": 20.0} for s in serials},
         )
+        ids = [json.loads(p)["unique_id"] for t, p in results if "_device_" in t]
+        assert len(ids) == len(serials) == len(set(ids))
 
     def test_pw2_unit_sensors(self):
         """A PW2 unit: controller temp + fan speed/target, no duty sensors."""

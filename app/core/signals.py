@@ -4,8 +4,13 @@ One catalogue, in #130's shape and with #130's metric ids, shared by every
 feature that reads these signals (MQTT publishing + Home Assistant
 discovery, the history time-series store). Metric ids are permanent once
 released: they become Home Assistant unique IDs and stored history series,
-so renaming one later would orphan entities and data. Adding a metric is one
-entry in ``SIGNAL_METRICS`` here; nothing else needs a schema change.
+so renaming one later would orphan entities and data.
+
+Adding a metric: one entry in ``SIGNAL_METRICS`` (plus ``SIGNAL_GROUPS`` for
+a new group), no schema change - and each consumer's presentation for it.
+Today that is MQTT's topic suffix and icon in
+``app.mqtt.ha_discovery.DEVICE_METRIC_TOPICS`` (``test_map_covers_registry``
+fails until it is added); the history page needs nothing more.
 
 This module must stay dependency-free (standard library only, no MQTT or
 web imports) so the history store can import it without pulling in MQTT.
