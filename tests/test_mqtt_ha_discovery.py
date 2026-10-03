@@ -11,16 +11,17 @@ These tests validate:
   - Discovery is sent exactly once per gateway per connection (not on every poll)
   - Discovery is re-sent after a reconnect (_discovery_sent cleared)
 """
+
 import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.core.signals import extract_unit_signals
 from app.mqtt.ha_discovery import (
     build_discovery_payloads,
     discovery_signature,
-    extract_device_signals,
     extract_remote_meters,
 )
 from app.mqtt.publisher import MqttPublisher
@@ -35,6 +36,7 @@ BASE_ENTITY_COUNT = 23
 # Helpers (shared with test_mqtt_publisher.py pattern)
 # ---------------------------------------------------------------------------
 
+
 def make_status(
     gateway_id: str = "test-gw",
     gateway_name: str = "Test Gateway",
@@ -43,7 +45,9 @@ def make_status(
     soe: float = 73.6842105263,
     soe_raw: float = 75.0,
 ) -> GatewayStatus:
-    gateway = Gateway(id=gateway_id, name=gateway_name, host="192.168.91.1", online=online)
+    gateway = Gateway(
+        id=gateway_id, name=gateway_name, host="192.168.91.1", online=online
+    )
     data = PowerwallData(
         soe_raw=soe_raw,
         soe=soe,
@@ -59,17 +63,25 @@ def make_status(
         version=version,
         timestamp=1_000_000.0,
     )
-    return GatewayStatus(gateway=gateway, data=data, online=online, last_updated=1_000_000.0)
+    return GatewayStatus(
+        gateway=gateway, data=data, online=online, last_updated=1_000_000.0
+    )
 
 
 # ---------------------------------------------------------------------------
 # Unit tests for build_discovery_payloads()
 # ---------------------------------------------------------------------------
 
+
 class TestBuildDiscoveryPayloads:
-    def _payloads(self, gateway_id="home", gateway_name="Home Powerwall",
-                  prefix="pypowerwall", ha_prefix="homeassistant",
-                  version="23.44.0") -> list[tuple[str, dict]]:
+    def _payloads(
+        self,
+        gateway_id="home",
+        gateway_name="Home Powerwall",
+        prefix="pypowerwall",
+        ha_prefix="homeassistant",
+        version="23.44.0",
+    ) -> list[tuple[str, dict]]:
         raw = build_discovery_payloads(
             gateway_id=gateway_id,
             gateway_name=gateway_name,
@@ -107,7 +119,9 @@ class TestBuildDiscoveryPayloads:
             assert topic.endswith("/config"), f"Topic should end with /config: {topic}"
 
     def test_device_block_on_every_payload(self):
-        results = self._payloads(gateway_id="cabin", gateway_name="Cabin Powerwall", version="24.0.1")
+        results = self._payloads(
+            gateway_id="cabin", gateway_name="Cabin Powerwall", version="24.0.1"
+        )
         for topic, payload in results:
             assert "device" in payload, f"Missing device block: {topic}"
             device = payload["device"]
@@ -163,9 +177,12 @@ class TestBuildDiscoveryPayloads:
         """All six lifetime energy sensors are discovered."""
         results = dict(self._payloads())
         for uid in (
-            "grid_energy_imported", "grid_energy_exported",
-            "home_energy_imported", "solar_energy_exported",
-            "battery_energy_imported", "battery_energy_exported",
+            "grid_energy_imported",
+            "grid_energy_exported",
+            "home_energy_imported",
+            "solar_energy_exported",
+            "battery_energy_imported",
+            "battery_energy_exported",
         ):
             assert f"homeassistant/sensor/pypowerwall_home_{uid}/config" in results
 
@@ -349,14 +366,31 @@ class TestBuildDiscoveryPayloads:
         # base + 2×3 per-string + 1 pair (AB) × 3
         assert len(results) == BASE_ENTITY_COUNT + 6 + 3
         # AB pair present
-        assert "homeassistant/sensor/pypowerwall_home_string_ab_voltage/config" in payloads
+        assert (
+            "homeassistant/sensor/pypowerwall_home_string_ab_voltage/config" in payloads
+        )
         # CD and EF pairs must NOT be present (C/D/E/F not in string_ids)
-        assert "homeassistant/sensor/pypowerwall_home_string_cd_power/config" not in payloads
+        assert (
+            "homeassistant/sensor/pypowerwall_home_string_cd_power/config"
+            not in payloads
+        )
 
     def test_string_sensors_multi_pw3(self):
         """Multi-PW3 numbered strings (A1–F2) generate correct paired rollups."""
-        string_ids = ["A1", "B1", "C1", "D1", "E1", "F1",
-                      "A2", "B2", "C2", "D2", "E2", "F2"]
+        string_ids = [
+            "A1",
+            "B1",
+            "C1",
+            "D1",
+            "E1",
+            "F1",
+            "A2",
+            "B2",
+            "C2",
+            "D2",
+            "E2",
+            "F2",
+        ]
         results = build_discovery_payloads(
             gateway_id="home",
             gateway_name="Home",
@@ -368,8 +402,13 @@ class TestBuildDiscoveryPayloads:
         # base + 12×3 per-string + 6 pairs × 3
         assert len(results) == BASE_ENTITY_COUNT + 36 + 18
         # Spot-check numbered pair AB1
-        assert "homeassistant/sensor/pypowerwall_home_string_ab1_voltage/config" in payloads
-        assert "homeassistant/sensor/pypowerwall_home_string_ab2_power/config" in payloads
+        assert (
+            "homeassistant/sensor/pypowerwall_home_string_ab1_voltage/config"
+            in payloads
+        )
+        assert (
+            "homeassistant/sensor/pypowerwall_home_string_ab2_power/config" in payloads
+        )
 
     def test_no_remote_meter_sensors_when_absent(self):
         """When remote_meters is not supplied, no remote-meter sensors are added."""
@@ -559,9 +598,11 @@ class TestExtractRemoteMeters:
 # Integration tests for MqttPublisher._publish_ha_discovery()
 # ---------------------------------------------------------------------------
 
+
 class TestPublisherHaDiscovery:
     def _make_publisher(self, monkeypatch) -> MqttPublisher:
         from app.config import settings as _settings
+
         monkeypatch.setattr(_settings, "mqtt_host", "localhost")
         monkeypatch.setattr(_settings, "mqtt_topic_prefix", "pypowerwall")
         monkeypatch.setattr(_settings, "mqtt_ha_prefix", "homeassistant")
@@ -637,6 +678,7 @@ class TestPublisherHaDiscovery:
         """No discovery payloads when MQTT_HA_DISCOVERY=false."""
         pub = self._make_publisher(monkeypatch)
         from app.config import settings as _settings
+
         monkeypatch.setattr(_settings, "mqtt_ha_discovery", False)
         mock_client = AsyncMock()
         pub._client = mock_client
@@ -898,7 +940,7 @@ _DEVICE_VITALS = {
         "PCH_FanSpeed_A": 1200,
         "PCH_FanDuty_A": 35.5,
         "PCH_FanSpeed_B": 1180.0,
-        "PCH_FanDuty_B": "33.2",
+        "PCH_FanDuty_B": 33.2,
     },
     "TETHC--1081100-08-C--TG123456789": {
         "serialNumber": "TG123456789",
@@ -912,27 +954,27 @@ _DEVICE_VITALS = {
 
 
 class TestExtractDeviceSignals:
-    """Unit tests for extract_device_signals() - normalizes vitals +
+    """Unit tests for extract_unit_signals() - normalizes vitals +
     get_fan_speeds() into per-unit temperature/fan signals keyed by serial."""
 
     def test_pw3_unit(self):
         """A PW3 unit yields pack temps, shunt, inverter ambient and both fans."""
-        result = extract_device_signals(_DEVICE_VITALS, None)
+        result = extract_unit_signals(_DEVICE_VITALS, None)
         pw3 = result["TG2312H0001"]
-        assert pw3["temp_pack_max"] == 23.5
-        assert pw3["temp_pack_min"] == 22.1
-        assert pw3["temp_shunt"] == 24.0
-        assert pw3["temp_ambient"] == 31.2
+        assert pw3["pack_temp_max"] == 23.5
+        assert pw3["pack_temp_min"] == 22.1
+        assert pw3["shunt_temp"] == 24.0
+        assert pw3["inverter_ambient"] == 31.2
         assert pw3["fan_a_rpm"] == 1200.0
         assert pw3["fan_a_duty"] == 35.5
         assert pw3["fan_b_rpm"] == 1180.0
-        assert pw3["fan_b_duty"] == 33.2  # string value coerced to float
+        assert pw3["fan_b_duty"] == 33.2
 
     def test_pw2_unit(self):
         """A PW2 unit yields the controller temp and a single fan (no duty)."""
-        result = extract_device_signals(_DEVICE_VITALS, None)
+        result = extract_unit_signals(_DEVICE_VITALS, None)
         pw2 = result["TG123456789"]
-        assert pw2["temp_controller"] == 25.0
+        assert pw2["controller_ambient"] == 25.0
         assert pw2["fan_rpm"] == 810.0
         assert pw2["fan_target_rpm"] == 900.0
         assert "fan_a_rpm" not in pw2
@@ -944,8 +986,8 @@ class TestExtractDeviceSignals:
         vitals = {
             "TETHC--1081100-08-C--TG999999999": {"THC_AmbientTemp": 21.0},
         }
-        result = extract_device_signals(vitals, None)
-        assert result == {"TG999999999": {"temp_controller": 21.0}}
+        result = extract_unit_signals(vitals, None)
+        assert result == {"TG999999999": {"controller_ambient": 21.0}}
 
     def test_fan_speeds_payload_fills_missing_signals(self):
         """The get_fan_speeds() payload only fills signals vitals did not
@@ -959,14 +1001,14 @@ class TestExtractDeviceSignals:
                 "PVAC_Fan_Speed_Target_RPM": 905,
             }
         }
-        result = extract_device_signals(vitals, fan_speeds)
+        result = extract_unit_signals(vitals, fan_speeds)
         assert result["TG123456789"]["fan_rpm"] == 812.0
         assert result["TG123456789"]["fan_target_rpm"] == 905.0
 
         # With vitals fan readings present, the fan_speeds value loses
         fan_speeds["PVAC--1081100-08-C--TG123456789"]["PVAC_Fan_Speed_Actual_RPM"] = 1
         vitals["PVAC--1081100-08-C--TG123456789"] = {"PVAC_Fan_Speed_Actual_RPM": 810}
-        result = extract_device_signals(vitals, fan_speeds)
+        result = extract_unit_signals(vitals, fan_speeds)
         assert result["TG123456789"]["fan_rpm"] == 810.0
 
     def test_tepinv_wins_over_same_serial_pvac(self):
@@ -981,14 +1023,14 @@ class TestExtractDeviceSignals:
                 "PCH_FanSpeed_A": 1200,
             },
         }
-        result = extract_device_signals(vitals, None)
+        result = extract_unit_signals(vitals, None)
         assert result["TG2312H0001"]["fan_a_rpm"] == 1200.0
         assert "fan_rpm" not in result["TG2312H0001"]
 
     def test_none_or_malformed_input(self):
-        assert extract_device_signals(None, None) == {}
-        assert extract_device_signals({}, {}) == {}
-        assert extract_device_signals({"TEPOD--x": "not a dict"}, None) == {}
+        assert extract_unit_signals(None, None) == {}
+        assert extract_unit_signals({}, {}) == {}
+        assert extract_unit_signals({"TEPOD--x": "not a dict"}, None) == {}
 
     def test_none_and_non_numeric_values_dropped(self):
         vitals = {
@@ -999,7 +1041,7 @@ class TestExtractDeviceSignals:
                 "PCH_FanSpeed_B": 5.0,
             },
         }
-        result = extract_device_signals(vitals, None)
+        result = extract_unit_signals(vitals, None)
         assert result == {"TG2312H0001": {"fan_b_rpm": 5.0}}
 
     @pytest.mark.parametrize("serial", ["TG1/23", "TG1+23", "TG1#23", ""])
@@ -1007,19 +1049,27 @@ class TestExtractDeviceSignals:
         """The serial is an MQTT topic level: '/', '+', '#' and '' would break
         the publish, so such blocks are skipped."""
         vitals = {f"TETHC--part--{serial}": {"THC_AmbientTemp": 21.0}}
-        assert extract_device_signals(vitals, None) == {}
+        assert extract_unit_signals(vitals, None) == {}
 
     def test_unrelated_blocks_ignored(self):
         vitals = {
             "STSTSM--1081100-08-C--GW123456789": {"GatewayLoad": 5.0},
             "NEURIO--VAH1234AB1234": {"NEURIO_CT0_InstVoltage": 120.0},
         }
-        assert extract_device_signals(vitals, None) == {}
+        assert extract_unit_signals(vitals, None) == {}
 
     def test_malformed_fan_speeds_keys_ignored(self):
         """fan_speeds keys need at least '<type>--<part>--<serial>'."""
-        assert extract_device_signals(None, {"PVAC--TG123456789": {"PVAC_Fan_Speed_Actual_RPM": 1}}) == {}
-        assert extract_device_signals(None, {"TETHC--a--b--TG1": {"THC_AmbientTemp": 1}}) == {}
+        assert (
+            extract_unit_signals(
+                None, {"PVAC--TG123456789": {"PVAC_Fan_Speed_Actual_RPM": 1}}
+            )
+            == {}
+        )
+        assert (
+            extract_unit_signals(None, {"TETHC--a--b--TG1": {"THC_AmbientTemp": 1}})
+            == {}
+        )
 
 
 class TestDeviceSignalSensors:
@@ -1037,7 +1087,7 @@ class TestDeviceSignalSensors:
 
     def test_pw3_unit_sensors(self):
         """A PW3 unit: 4 temperature + 4 fan sensors."""
-        signals = extract_device_signals(_DEVICE_VITALS, None)
+        signals = extract_unit_signals(_DEVICE_VITALS, None)
         results = build_discovery_payloads(
             gateway_id="home",
             gateway_name="Home",
@@ -1052,16 +1102,15 @@ class TestDeviceSignalSensors:
         assert len(device_entries) == 8
         assert len(results) == BASE_ENTITY_COUNT + 8
 
-        topic = (
-            "homeassistant/sensor/pypowerwall_home_device_tg2312h0001_temp_pack_max/config"
-        )
+        topic = "homeassistant/sensor/pypowerwall_home_device_tg2312h0001_pack_temp_max/config"
         assert topic in payloads
         p = payloads[topic]
         assert p["unit_of_measurement"] == "°C"
         assert p["device_class"] == "temperature"
         assert p["state_class"] == "measurement"
         assert (
-            p["state_topic"] == "pypowerwall/home/devices/TG2312H0001/temperature/pack_max"
+            p["state_topic"]
+            == "pypowerwall/home/devices/TG2312H0001/temperature/pack_max"
         )
         assert p["entity_category"] == "diagnostic"
         assert "TG2312H0001" in p["name"]
@@ -1076,7 +1125,7 @@ class TestDeviceSignalSensors:
 
     def test_pw2_unit_sensors(self):
         """A PW2 unit: controller temp + fan speed/target, no duty sensors."""
-        signals = extract_device_signals(_DEVICE_VITALS, None)
+        signals = extract_unit_signals(_DEVICE_VITALS, None)
         results = build_discovery_payloads(
             gateway_id="home",
             gateway_name="Home",
@@ -1100,16 +1149,20 @@ class TestDeviceSignalSensors:
             gateway_name="Home",
             topic_prefix="pypowerwall",
             ha_prefix="homeassistant",
-            device_signals={"TG2312H0002": {"temp_pack_max": 22.0, "temp_pack_min": 21.0}},
+            device_signals={
+                "TG2312H0002": {"pack_temp_max": 22.0, "pack_temp_min": 21.0}
+            },
         )
         device_topics = [t for t, _ in results if "_device_" in t]
         assert len(device_topics) == 2
-        state_topics = [json.loads(p)["state_topic"] for t, p in results if "_device_" in t]
+        state_topics = [
+            json.loads(p)["state_topic"] for t, p in results if "_device_" in t
+        ]
         assert all("temperature" in t for t in state_topics)
 
     def test_device_sensors_have_availability(self):
         """Device sensors share the gateway availability topics like all others."""
-        signals = extract_device_signals(_DEVICE_VITALS, None)
+        signals = extract_unit_signals(_DEVICE_VITALS, None)
         results = build_discovery_payloads(
             gateway_id="main",
             gateway_name="Main",
@@ -1131,21 +1184,23 @@ class TestDiscoverySignatureDevices:
     units are discovered exactly once."""
 
     def test_device_signals_in_signature(self):
-        sig = discovery_signature(None, _DEVICE_VITALS, None)
-        assert ("device", "TG2312H0001", "temp_pack_max") in sig
+        sig = discovery_signature(
+            None, _DEVICE_VITALS, extract_unit_signals(_DEVICE_VITALS, None)
+        )
+        assert ("device", "TG2312H0001", "pack_temp_max") in sig
         assert ("device", "TG123456789", "fan_rpm") in sig
         assert len(sig) == 11  # 8 PW3 signals + 3 PW2 signals
 
     def test_empty_inputs(self):
         assert discovery_signature(None, None, None) == frozenset()
 
-    def test_fan_speeds_only_contributes(self):
-        """fan_speeds alone (no vitals) still yields device entities."""
-        sig = discovery_signature(
-            None,
-            None,
-            {"PVAC--1081100-08-C--TG123456789": {"PVAC_Fan_Speed_Actual_RPM": 810}},
-        )
+    def test_fan_speeds_only_unit_discovered(self):
+        """A unit whose only signals come from fan_speeds (no vitals this
+        poll) still enters the signature, so it is discovered exactly once."""
+        fan_speeds = {
+            "PVAC--1081100-08-C--TG123456789": {"PVAC_Fan_Speed_Actual_RPM": 810}
+        }
+        sig = discovery_signature(None, None, extract_unit_signals(None, fan_speeds))
         assert ("device", "TG123456789", "fan_rpm") in sig
 
 
@@ -1192,3 +1247,69 @@ class TestDeviceSignalsLateDiscovery:
 
         # A later snapshot without vitals doesn't re-send anything
         assert await self._discovery_topics(pub, make_status()) == []
+
+
+class TestExtractUnitSignalsExtra:
+    """Additional edge cases for the shared extraction in app/core/signals.py."""
+
+    def test_fan_speeds_pvac_skipped_for_pw3_unit(self):
+        """A PW3 unit (already has TEPINV fans) ignores a same-serial PVAC
+        block in the fan_speeds payload too, not just in vitals."""
+        fan_speeds = {
+            "TEPINV--1707000-21-M--TG2312H0001": {"PCH_FanSpeed_A": 1200},
+            "PVAC--1081100-38-F--TG2312H0001": {"PVAC_Fan_Speed_Actual_RPM": 700},
+        }
+        result = extract_unit_signals(None, fan_speeds)
+        assert result == {"TG2312H0001": {"fan_a_rpm": 1200.0}}
+
+    @pytest.mark.parametrize("serial", ["TG1/23", "TG1+23", "TG1#23", ""])
+    def test_fan_speeds_serial_wildcards_skipped(self, serial):
+        """The wildcard-serial guard applies to the fan_speeds path as well."""
+        fan_speeds = {f"PVAC--part--{serial}": {"PVAC_Fan_Speed_Actual_RPM": 810}}
+        assert extract_unit_signals(None, fan_speeds) == {}
+
+    def test_serial_number_field_preferred_over_key_suffix(self):
+        """When a block's serialNumber differs from the key suffix, the
+        serialNumber field wins (same keying as the web console)."""
+        vitals = {
+            "TETHC--1081100-08-C--TG-KEY-SERIAL": {
+                "serialNumber": "TG-REAL-SERIAL",
+                "THC_AmbientTemp": 21.5,
+            },
+        }
+        result = extract_unit_signals(vitals, None)
+        assert result == {"TG-REAL-SERIAL": {"controller_ambient": 21.5}}
+
+    def test_unit_without_readings_dropped(self):
+        """A block that yields no usable signal must not leave an empty
+        unit behind (an empty dict would create a bare devices/{serial}
+        publish with no readings)."""
+        vitals = {
+            "TETHC--1081100-08-C--TG123456789": {
+                "THC_AmbientTemp": None,  # no usable reading in this block
+            },
+        }
+        assert extract_unit_signals(vitals, None) == {}
+
+    def test_nan_and_infinity_rejected(self):
+        """'nan'/'inf' strings or float NaN/inf must never become metric
+        values - they would publish invalid JSON and HA payloads."""
+        vitals = {
+            "TEPOD--1081100-38-F--TG2312H0001": {
+                "serialNumber": "TG2312H0001",
+                "HVP_PackTempMax": "nan",
+                "HVP_PackTempMin": float("inf"),
+                "HVP_ShuntTemperature": float("nan"),
+            },
+        }
+        assert extract_unit_signals(vitals, None) == {}
+
+    def test_signal_value_semantics(self):
+        from app.core.signals import signal_value
+
+        assert signal_value(3) == 3.0
+        assert signal_value("2.5") is None  # strings are never coerced
+        assert signal_value(True) is None  # bool is not a number here
+        assert signal_value(float("nan")) is None
+        assert signal_value(float("inf")) is None
+        assert signal_value(None) is None

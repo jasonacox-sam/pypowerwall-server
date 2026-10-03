@@ -102,6 +102,7 @@ Topic layout
     Sourced from pw.vitals()'s TRM--<din> blocks (pypowerwall >= 0.18.2 in
     TEDAPI modes; Basic LAN skips vitals) - absent when no remote meter.
 """
+
 import asyncio
 import json
 import logging
@@ -115,14 +116,14 @@ class MqttPublisher:
     """Async MQTT publisher with persistent connection and reconnect logic."""
 
     def __init__(self):
-        self._client = None              # aiomqtt.Client instance (inside context)
-        self._connected: bool = False    # True only while inside active async with
+        self._client = None  # aiomqtt.Client instance (inside context)
+        self._connected: bool = False  # True only while inside active async with
         self._connection_task: Optional[asyncio.Task] = None
         self._shutdown: bool = False
         # Per gateway: the optional entities (strings, remote-meter CTs)
         # already announced; a gateway key means base discovery was sent
         self._discovery_sent: Dict[str, frozenset] = {}
-        self._backoff: int = 2           # current reconnect backoff in seconds
+        self._backoff: int = 2  # current reconnect backoff in seconds
 
     # ------------------------------------------------------------------
     # Public API
@@ -132,6 +133,7 @@ class MqttPublisher:
     def enabled(self) -> bool:
         """True when MQTT_HOST is configured."""
         from app.config import settings  # late import — avoids circular deps
+
         return settings.mqtt_enabled
 
     @property
@@ -181,15 +183,19 @@ class MqttPublisher:
                 pass
         logger.info("MQTT publisher stopped.")
 
-    async def _publish_ha_discovery(self, gateway_id: str, status) -> None:
+    async def _publish_ha_discovery(
+        self, gateway_id: str, status, device_signals: Optional[dict] = None
+    ) -> None:
         """Publish Home Assistant auto-discovery payloads for a gateway.
 
         Called once per gateway on first connection (tracked in _discovery_sent).
         Re-sent after every broker reconnect so HA re-discovers after restarts.
 
         Args:
-            gateway_id: Gateway identifier.
-            status:     GatewayStatus used to extract name and version.
+            gateway_id:     Gateway identifier.
+            status:         GatewayStatus used to extract name and version.
+            device_signals: Per-unit signals from extract_unit_signals(),
+                            when the caller already computed them this poll.
         """
         if not self._connected or self._client is None:
             return
@@ -197,9 +203,9 @@ class MqttPublisher:
             from app.config import settings  # late import
             from app.mqtt.ha_discovery import (
                 build_discovery_payloads,
-                extract_device_signals,
                 extract_remote_meters,
             )
+            from app.core.signals import extract_unit_signals
 
             gateway_name = (
                 status.gateway.name
@@ -209,7 +215,11 @@ class MqttPublisher:
             version = status.data.version if status.data else None
 
             string_ids = None
-            if status.data and status.data.strings and isinstance(status.data.strings, dict):
+            if (
+                status.data
+                and status.data.strings
+                and isinstance(status.data.strings, dict)
+            ):
                 string_ids = list(status.data.strings.keys())
 
             remote_meters = (
@@ -217,9 +227,13 @@ class MqttPublisher:
             )
 
             device_signals = (
-                extract_device_signals(status.data.vitals, status.data.fan_speeds)
-                if status.data
-                else {}
+                device_signals
+                if device_signals is not None
+                else (
+                    extract_unit_signals(status.data.vitals, status.data.fan_speeds)
+                    if status.data
+                    else {}
+                )
             )
 
             payloads = build_discovery_payloads(
@@ -233,7 +247,9 @@ class MqttPublisher:
                 device_signals=device_signals or None,
             )
             for topic, payload in payloads:
-                await self._safe_publish(topic, payload, retain=True, qos=settings.mqtt_qos)
+                await self._safe_publish(
+                    topic, payload, retain=True, qos=settings.mqtt_qos
+                )
 
             logger.info(
                 f"MQTT HA discovery published for gateway '{gateway_id}' "
@@ -260,23 +276,31 @@ class MqttPublisher:
         # per-unit device signals not announced yet (re-sent after reconnect
         # too: _discovery_sent is cleared there). Storing the union means a
         # later snapshot without them (e.g. a vitals timeout) doesn't re-send.
+        from app.core.signals import extract_unit_signals
         from app.mqtt.ha_discovery import discovery_signature
 
         data = status.data if status else None
+        # Extract per-unit signals once per poll; discovery signature, HA
+        # discovery and the per-unit topics below all reuse this result.
+        device_signals = (
+            extract_unit_signals(data.vitals, data.fan_speeds) if data else {}
+        )
         signature = discovery_signature(
             data.strings if data else None,
             data.vitals if data else None,
-            data.fan_speeds if data else None,
+            device_signals,
         )
         announced = self._discovery_sent.get(gateway_id)
         if announced is None or not signature <= announced:
             from app.config import settings  # late import
+
             if settings.mqtt_ha_discovery:
-                await self._publish_ha_discovery(gateway_id, status)
+                await self._publish_ha_discovery(gateway_id, status, device_signals)
             self._discovery_sent[gateway_id] = (announced or frozenset()) | signature
 
         try:
             from app.config import settings  # late import
+
             prefix = f"{settings.mqtt_topic_prefix}/{gateway_id}"
             qos = settings.mqtt_qos
             retain = settings.mqtt_retain
@@ -287,7 +311,8 @@ class MqttPublisher:
             await self._safe_publish(
                 f"{prefix}/online",
                 "true" if status.online else "false",
-                retain, qos,
+                retain,
+                qos,
             )
 
             # Gateway friendly name (from gateways.yaml)
@@ -360,7 +385,8 @@ class MqttPublisher:
                     await self._safe_publish(
                         f"{prefix}/aggregates",
                         json.dumps(agg),
-                        retain, qos,
+                        retain,
+                        qos,
                     )
 
                     # Lifetime energy accumulators (Wh).  PW3/TEDAPI gateways
@@ -383,20 +409,23 @@ class MqttPublisher:
                             await self._safe_publish(
                                 f"{prefix}/{topic_suffix}",
                                 f"{energy_val:.0f}",
-                                retain, qos,
+                                retain,
+                                qos,
                             )
 
                 if data.grid_status is not None:
                     await self._safe_publish(
                         f"{prefix}/grid_status",
                         str(data.grid_status),
-                        retain, qos,
+                        retain,
+                        qos,
                     )
                     # Derived binary: grid_connected = true only when UP, else false (incl. unknown/SYNCING)
                     await self._safe_publish(
                         f"{prefix}/grid_connected",
                         "true" if data.grid_status == "UP" else "false",
-                        retain, qos,
+                        retain,
+                        qos,
                     )
 
                 if data.mode is not None:
@@ -418,14 +447,16 @@ class MqttPublisher:
                     await self._safe_publish(
                         f"{prefix}/grid_charging",
                         "true" if data.grid_charging else "false",
-                        retain, qos,
+                        retain,
+                        qos,
                     )
 
                 if data.grid_export is not None:
                     await self._safe_publish(
                         f"{prefix}/grid_export",
                         str(data.grid_export),
-                        retain, qos,
+                        retain,
+                        qos,
                     )
 
                 time_remaining = _safe_float(data.time_remaining)
@@ -434,7 +465,8 @@ class MqttPublisher:
                     await self._safe_publish(
                         f"{prefix}/time_remaining",
                         f"{time_remaining:.2f}",
-                        retain, qos,
+                        retain,
+                        qos,
                     )
 
                 # Solar string topics (voltage, current, power per string)
@@ -451,7 +483,8 @@ class MqttPublisher:
                                     await self._safe_publish(
                                         f"{s_prefix}/{metric.lower()}",
                                         f"{float(val):.2f}",
-                                        retain, qos,
+                                        retain,
+                                        qos,
                                     )
                                 except (ValueError, TypeError):
                                     pass
@@ -459,7 +492,8 @@ class MqttPublisher:
                         await self._safe_publish(
                             s_prefix,
                             json.dumps(string_data),
-                            retain, qos,
+                            retain,
+                            qos,
                         )
 
                     # Derived paired-string rollups for PW3
@@ -472,7 +506,7 @@ class MqttPublisher:
                     for key in data.strings:
                         if isinstance(key, str):
                             base = key.rstrip("0123456789")
-                            suffix = key[len(base):]
+                            suffix = key[len(base) :]
                             if base in ("A", "B", "C", "D", "E", "F"):
                                 suffixes.add(suffix)
                     for suffix in sorted(suffixes):
@@ -493,7 +527,9 @@ class MqttPublisher:
                             if v_a is not None:
                                 await self._safe_publish(
                                     f"{p_prefix}/voltage",
-                                    f"{v_a:.2f}", retain, qos,
+                                    f"{v_a:.2f}",
+                                    retain,
+                                    qos,
                                 )
                             c_a = _safe_float(sa.get("Current"))
                             c_b = _safe_float(sb.get("Current"))
@@ -501,7 +537,9 @@ class MqttPublisher:
                                 total_c = (c_a or 0.0) + (c_b or 0.0)
                                 await self._safe_publish(
                                     f"{p_prefix}/current",
-                                    f"{total_c:.2f}", retain, qos,
+                                    f"{total_c:.2f}",
+                                    retain,
+                                    qos,
                                 )
                             p_a = _safe_float(sa.get("Power"))
                             p_b = _safe_float(sb.get("Power"))
@@ -509,7 +547,9 @@ class MqttPublisher:
                                 total_p = (p_a or 0.0) + (p_b or 0.0)
                                 await self._safe_publish(
                                     f"{p_prefix}/power",
-                                    f"{total_p:.2f}", retain, qos,
+                                    f"{total_p:.2f}",
+                                    retain,
+                                    qos,
                                 )
 
                 # Remote meter topics (Tesla wireless CT meters - one or more
@@ -524,14 +564,18 @@ class MqttPublisher:
                             voltage = _safe_float(fields.get("InstVoltage"))
                             if voltage is not None:
                                 await self._safe_publish(
-                                    f"{ct_prefix}/voltage", f"{voltage:.2f}",
-                                    retain, qos,
+                                    f"{ct_prefix}/voltage",
+                                    f"{voltage:.2f}",
+                                    retain,
+                                    qos,
                                 )
                             current = _safe_float(fields.get("InstCurrent"))
                             if current is not None:
                                 await self._safe_publish(
-                                    f"{ct_prefix}/current", f"{current:.2f}",
-                                    retain, qos,
+                                    f"{ct_prefix}/current",
+                                    f"{current:.2f}",
+                                    retain,
+                                    qos,
                                 )
                             power = _safe_float(fields.get("InstRealPower"))
                             if power is not None:
@@ -547,7 +591,9 @@ class MqttPublisher:
                             if energy_imported_ws is not None:
                                 await self._safe_publish(
                                     f"{ct_prefix}/energy_imported",
-                                    f"{energy_imported_ws / 3600:.0f}", retain, qos,
+                                    f"{energy_imported_ws / 3600:.0f}",
+                                    retain,
+                                    qos,
                                 )
                             energy_exported_ws = _safe_float(
                                 fields.get("EnergyExportedWs")
@@ -555,7 +601,9 @@ class MqttPublisher:
                             if energy_exported_ws is not None:
                                 await self._safe_publish(
                                     f"{ct_prefix}/energy_exported",
-                                    f"{energy_exported_ws / 3600:.0f}", retain, qos,
+                                    f"{energy_exported_ws / 3600:.0f}",
+                                    retain,
+                                    qos,
                                 )
                             # Full per-CT JSON for consumers that want everything
                             await self._safe_publish(
@@ -564,30 +612,38 @@ class MqttPublisher:
 
                 # Per-unit device signal topics (Powerwall temperatures
                 # and fan speeds, keyed by unit serial — the same units as
-                # the web console's Powerwall Status table)
-                from app.mqtt.ha_discovery import (
-                    DEVICE_SIGNAL_CATALOGUE,
-                    extract_device_signals,
-                )
+                # the web console's Powerwall Status table). Uses the
+                # signals extracted once per poll above.
+                from app.mqtt.ha_discovery import _DEVICE_METRIC_PRESENTATION
 
-                for serial, signals in extract_device_signals(
-                    data.vitals, data.fan_speeds
-                ).items():
+                for serial, signals in device_signals.items():
                     device_prefix = f"{prefix}/devices/{serial}"
-                    for topic_suffix, key, _label, _unit, _dc, _icon in (
-                        DEVICE_SIGNAL_CATALOGUE
-                    ):
-                        value = signals.get(key)
-                        if value is None:
+                    rounded: dict = {}
+                    for metric_id, value in signals.items():
+                        entry = _DEVICE_METRIC_PRESENTATION.get(metric_id)
+                        if entry is None:
                             continue
+                        topic_suffix = entry[0]
+                        # rpm as whole numbers, everything else 1 decimal -
+                        # the per-unit JSON below carries the same rounding
+                        rounded[metric_id] = (
+                            round(value)
+                            if metric_id.endswith("_rpm")
+                            else round(value, 1)
+                        )
                         await self._safe_publish(
                             f"{device_prefix}/{topic_suffix}",
-                            f"{value:.0f}" if key.endswith("_rpm") else f"{value:.1f}",
-                            retain, qos,
+                            (
+                                f"{rounded[metric_id]:.0f}"
+                                if metric_id.endswith("_rpm")
+                                else f"{rounded[metric_id]:.1f}"
+                            ),
+                            retain,
+                            qos,
                         )
                     # Full per-unit JSON for consumers that want everything
                     await self._safe_publish(
-                        device_prefix, json.dumps(signals), retain, qos
+                        device_prefix, json.dumps(rounded), retain, qos
                     )
 
                 # Summary JSON topic
@@ -602,7 +658,11 @@ class MqttPublisher:
                     "home": home if data.aggregates else None,
                     "powerwall": pw_power if data.aggregates else None,
                     "grid_status": data.grid_status,
-                    "grid_connected": (data.grid_status == "UP") if data.grid_status is not None else None,
+                    "grid_connected": (
+                        (data.grid_status == "UP")
+                        if data.grid_status is not None
+                        else None
+                    ),
                     "mode": data.mode,
                     "reserve": data.reserve,
                     "version": data.version,
@@ -621,7 +681,8 @@ class MqttPublisher:
             await self._safe_publish(
                 f"{prefix}/availability",
                 "online" if status.online else "offline",
-                retain, qos,
+                retain,
+                qos,
             )
 
         except Exception as e:
@@ -727,8 +788,10 @@ class MqttPublisher:
                     # stays stuck at "unavailable" even when state data is flowing.
                     global_avail_topic = f"{settings.mqtt_topic_prefix}/availability"
                     await self._safe_publish(
-                        global_avail_topic, "online",
-                        retain=True, qos=settings.mqtt_qos,
+                        global_avail_topic,
+                        "online",
+                        retain=True,
+                        qos=settings.mqtt_qos,
                     )
 
                     # Inner heartbeat loop: stays alive until a publish failure
@@ -782,7 +845,9 @@ def _extract_power(aggregates: dict, key: str) -> Optional[float]:
         return None
 
 
-def _extract_energy(aggregates: Optional[dict], section: str, field: str) -> Optional[float]:
+def _extract_energy(
+    aggregates: Optional[dict], section: str, field: str
+) -> Optional[float]:
     """Safely extract a lifetime energy accumulator (Wh) from aggregates."""
     try:
         val = aggregates[section][field]
