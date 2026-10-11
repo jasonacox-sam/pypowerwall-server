@@ -40,10 +40,10 @@ Topic layout
     {prefix}/{gateway_id}/grid_status     str    — "UP" | "DOWN" | "unknown"
     {prefix}/{gateway_id}/mode            str    — operation mode
     {prefix}/{gateway_id}/reserve         float  — backup reserve %
-{prefix}/{gateway_id}/total_capacity  int    — total battery capacity (Wh)
-{prefix}/{gateway_id}/batteries/{n}/capacity  int — battery n capacity (Wh)
-{prefix}/{gateway_id}/batteries/{n}/charge    int — battery n charge (Wh)
-{prefix}/{gateway_id}/batteries       json   — per-battery capacity/charge list
+    {prefix}/{gateway_id}/total_capacity  int    — total battery capacity (Wh)
+    {prefix}/{gateway_id}/batteries/{n}/capacity  int — battery n capacity (Wh)
+    {prefix}/{gateway_id}/batteries/{n}/charge    int — battery n charge (Wh)
+    {prefix}/{gateway_id}/batteries       json   — per-battery capacity/charge list
     {prefix}/{gateway_id}/current_charge  int    — current battery charge (Wh)
     {prefix}/{gateway_id}/online          str    — "true" | "false"
     {prefix}/{gateway_id}/grid_connected  str    — "true" | "false" (true when grid_status=="UP")
@@ -262,10 +262,8 @@ class MqttPublisher:
 
             controls_mask, writable, is_v1r = self._control_announce_state(gateway_id)
 
-            battery_count = len(
-                _extract_battery_blocks(
-                    status.data.system_status if status.data else None
-                )
+            batteries = _extract_battery_blocks(
+                status.data.system_status if status.data else None
             )
 
             payloads = build_discovery_payloads(
@@ -277,7 +275,7 @@ class MqttPublisher:
                 string_ids=string_ids,
                 remote_meters=remote_meters or None,
                 device_signals=device_signals or None,
-                battery_count=battery_count,
+                batteries=batteries or None,
                 controls=controls_mask,
                 writable=writable,
                 is_v1r=is_v1r,
@@ -346,10 +344,14 @@ class MqttPublisher:
                     exc_info=True,
                 )
         controls_state = self._control_announce_state(gateway_id)
+        batteries = _extract_battery_blocks(
+            data.system_status if data else None
+        )
         signature = discovery_signature(
             data.strings if data else None,
             data.vitals if data else None,
             device_signals,
+            batteries=batteries,
         )
         announced = self._discovery_sent.get(gateway_id)
         last_controls = self._discovery_controls_state.get(gateway_id)
@@ -424,8 +426,8 @@ class MqttPublisher:
                 # system status battery blocks - lets degradation be tracked
                 # for each individual battery rather than the aggregate.
                 batteries = _extract_battery_blocks(data.system_status)
-                for i, batt in enumerate(batteries, start=1):
-                    b_prefix = f"{prefix}/batteries/{i}"
+                for batt in batteries:
+                    b_prefix = f"{prefix}/batteries/{batt['index']}"
                     if batt["capacity"] is not None:
                         await self._safe_publish(
                             f"{b_prefix}/capacity",
@@ -1306,11 +1308,14 @@ def _extract_battery_energy(
 def _extract_battery_blocks(system_status: Optional[dict]) -> list:
     """Extract per-battery capacity/charge values (Wh) from system status.
 
-    Returns a list of {"capacity": float|None, "charge": float|None} dicts,
-    one per battery block that reports at least one of the two values, in
-    gateway order (blocks with no usable values are skipped).  Callers can
-    use len() of the result for sensor discovery and enumerate() for
-    per-battery topics.
+    Returns a list of {"index": int, "capacity": float|None,
+    "charge": float|None} dicts, one per battery block that reports at
+    least one of the two values.  "index" is the block's 1-based position
+    in the gateway's battery_blocks list, so a block that temporarily
+    reports neither value is skipped without collapsing the numbering of
+    the batteries after it — degradation histories keep pointing at the
+    same physical battery.  Discovery uses each block's available metrics
+    so only entities backed by a published topic are announced.
     """
     if not isinstance(system_status, dict):
         return []
@@ -1320,14 +1325,14 @@ def _extract_battery_blocks(system_status: Optional[dict]) -> list:
         return []
 
     batteries = []
-    for block in blocks:
+    for index, block in enumerate(blocks, start=1):
         if not isinstance(block, dict):
             continue
         capacity = _safe_float(block.get("nominal_full_pack_energy"))
         charge = _safe_float(block.get("nominal_energy_remaining"))
         if capacity is None and charge is None:
             continue
-        batteries.append({"capacity": capacity, "charge": charge})
+        batteries.append({"index": index, "capacity": capacity, "charge": charge})
     return batteries
 
 

@@ -159,18 +159,32 @@ class TestExtractBatteryBlocks:
         }
         blocks = _extract_battery_blocks(status)
         assert len(blocks) == 2
-        assert blocks[0] == {"capacity": 13_500.0, "charge": 11_547.0}
-        assert blocks[1] == {"capacity": 13_500.0, "charge": 11_000.0}
+        assert blocks[0] == {"index": 1, "capacity": 13_500.0, "charge": 11_547.0}
+        assert blocks[1] == {"index": 2, "capacity": 13_500.0, "charge": 11_000.0}
 
     def test_partial_block_included(self):
         status = {"battery_blocks": [{"nominal_energy_remaining": 9_000}]}
         assert _extract_battery_blocks(status) == [
-            {"capacity": None, "charge": 9_000.0}
+            {"index": 1, "capacity": None, "charge": 9_000.0}
         ]
 
     def test_blocks_with_no_values_skipped(self):
         status = {"battery_blocks": [{"pin": 5}, {"nominal_full_pack_energy": 100}]}
-        assert _extract_battery_blocks(status) == [{"capacity": 100.0, "charge": None}]
+        assert _extract_battery_blocks(status) == [
+            {"index": 2, "capacity": 100.0, "charge": None}
+        ]
+
+    def test_block_numbering_preserved_when_a_block_goes_silent(self):
+        """A block that reports neither value must not renumber the rest."""
+        status = {
+            "battery_blocks": [
+                {"nominal_full_pack_energy": 13_500, "nominal_energy_remaining": 11_547},
+                {"pin": 5},  # block 2 temporarily silent
+                {"nominal_full_pack_energy": 13_500, "nominal_energy_remaining": 11_000},
+            ]
+        }
+        blocks = _extract_battery_blocks(status)
+        assert [b["index"] for b in blocks] == [1, 3]
 
     def test_missing_or_invalid(self):
         assert _extract_battery_blocks({}) == []

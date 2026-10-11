@@ -1,5 +1,10 @@
 # Release Notes
 
+## Upcoming
+
+**Added:**
+- **MQTT: per-battery capacity and charge** — each battery block now publishes `{prefix}/{gw}/batteries/{n}/capacity` and `{prefix}/{gw}/batteries/{n}/charge` (Wh) plus a `{prefix}/{gw}/batteries` JSON summary, with matching Home Assistant sensors, so individual battery degradation can be tracked instead of just the site aggregate. Battery numbering follows the gateway's block order and survives a block temporarily going silent, and only measurements the gateway actually reports are announced. (#150)
+
 ## Version History
 
 ### [0.9.1] - 2026-10-10

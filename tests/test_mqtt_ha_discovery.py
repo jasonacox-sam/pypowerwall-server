@@ -336,13 +336,16 @@ class TestBuildDiscoveryPayloads:
         assert p["state_topic"] == "pypowerwall/home/strings/AB/power"
 
     def test_battery_sensors_per_battery(self):
-        """battery_count=2 -> 2 capacity + 2 charge sensors with Wh fields."""
+        """2 full blocks -> 2 capacity + 2 charge sensors with Wh fields."""
         results = build_discovery_payloads(
             gateway_id="home",
             gateway_name="Home",
             topic_prefix="pypowerwall",
             ha_prefix="homeassistant",
-            battery_count=2,
+            batteries=[
+                {"index": 1, "capacity": 13_500.0, "charge": 11_547.0},
+                {"index": 2, "capacity": 13_500.0, "charge": 11_000.0},
+            ],
         )
         payloads = {t: json.loads(p) for t, p in results}
         assert len(results) == BASE_ENTITY_COUNT + 4
@@ -359,8 +362,8 @@ class TestBuildDiscoveryPayloads:
         assert topic in payloads
         assert payloads[topic]["state_topic"] == "pypowerwall/home/batteries/2/charge"
 
-    def test_no_battery_sensors_when_count_zero(self):
-        """battery_count=0 (default) -> no per-battery entities."""
+    def test_no_battery_sensors_when_none(self):
+        """batteries=None (default) -> no per-battery entities."""
         results = build_discovery_payloads(
             gateway_id="home",
             gateway_name="Home",
@@ -368,6 +371,24 @@ class TestBuildDiscoveryPayloads:
             ha_prefix="homeassistant",
         )
         assert not any("battery_1_" in t for t, _ in results)
+
+    def test_battery_sensors_only_for_available_metrics(self):
+        """A charge-only block gets a charge entity but no capacity entity."""
+        results = build_discovery_payloads(
+            gateway_id="home",
+            gateway_name="Home",
+            topic_prefix="pypowerwall",
+            ha_prefix="homeassistant",
+            batteries=[
+                {"index": 1, "capacity": 13_500.0, "charge": 11_547.0},
+                {"index": 3, "capacity": None, "charge": 9_000.0},
+            ],
+        )
+        topics = {t for t, _ in results}
+        assert "homeassistant/sensor/pypowerwall_home_battery_1_capacity/config" in topics
+        assert "homeassistant/sensor/pypowerwall_home_battery_1_charge/config" in topics
+        assert "homeassistant/sensor/pypowerwall_home_battery_3_charge/config" in topics
+        assert "homeassistant/sensor/pypowerwall_home_battery_3_capacity/config" not in topics
 
     def test_string_sensors_partial_strings(self):
         """Only strings present are discovered — no entities for missing strings."""
