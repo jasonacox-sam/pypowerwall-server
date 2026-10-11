@@ -289,6 +289,7 @@ def build_discovery_payloads(
     string_ids: Optional[Sequence[str]] = None,
     remote_meters: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
     device_signals: Optional[Dict[str, Dict[str, Any]]] = None,
+    battery_count: int = 0,
     controls: int = 0,
     writable: bool = False,
     is_v1r: bool = False,
@@ -315,6 +316,11 @@ def build_discovery_payloads(
                        get_fan_speeds()) - {serial: {metric_id: value}}.  When
                        provided, per-unit temperature and fan sensors are
                        added so HA auto-discovers them.
+        battery_count:  Number of battery blocks found in the cached system
+                       status (from publisher._extract_battery_blocks()).
+                       When > 0, per-battery capacity and charge sensors (Wh)
+                       are added so HA auto-discovers them — useful for
+                       tracking individual battery degradation over time.
         controls:  MQTT_CONTROLS bitmask: only entities whose bit is set are
                    added (0 = monitoring only).
         writable:  The gateway can write reserve, mode and grid settings (cloud,
@@ -888,6 +894,29 @@ def build_discovery_payloads(
                             entity_category="diagnostic",
                         )
                     )
+
+    # --- Per-battery capacity sensors (degradation tracking) ---
+    if battery_count:
+        for i in range(1, battery_count + 1):
+            b_prefix = f"{data_prefix}/batteries/{i}"
+            results.append(sensor(
+                f"battery_{i}_capacity",
+                f"Battery {i} Capacity",
+                f"{b_prefix}/capacity",
+                unit="Wh",
+                device_class="energy_storage",
+                state_class="measurement",
+                icon="mdi:battery-high",
+            ))
+            results.append(sensor(
+                f"battery_{i}_charge",
+                f"Battery {i} Charge",
+                f"{b_prefix}/charge",
+                unit="Wh",
+                device_class="energy_storage",
+                state_class="measurement",
+                icon="mdi:battery-medium",
+            ))
 
     # --- Per-unit device sensors (Powerwall temperatures and fans) ---
     if device_signals:

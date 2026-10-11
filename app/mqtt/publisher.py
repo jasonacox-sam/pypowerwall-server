@@ -40,7 +40,10 @@ Topic layout
     {prefix}/{gateway_id}/grid_status     str    — "UP" | "DOWN" | "unknown"
     {prefix}/{gateway_id}/mode            str    — operation mode
     {prefix}/{gateway_id}/reserve         float  — backup reserve %
-    {prefix}/{gateway_id}/total_capacity  int    — total battery capacity (Wh)
+{prefix}/{gateway_id}/total_capacity  int    — total battery capacity (Wh)
+{prefix}/{gateway_id}/batteries/{n}/capacity  int — battery n capacity (Wh)
+{prefix}/{gateway_id}/batteries/{n}/charge    int — battery n charge (Wh)
+{prefix}/{gateway_id}/batteries       json   — per-battery capacity/charge list
     {prefix}/{gateway_id}/current_charge  int    — current battery charge (Wh)
     {prefix}/{gateway_id}/online          str    — "true" | "false"
     {prefix}/{gateway_id}/grid_connected  str    — "true" | "false" (true when grid_status=="UP")
@@ -259,6 +262,12 @@ class MqttPublisher:
 
             controls_mask, writable, is_v1r = self._control_announce_state(gateway_id)
 
+            battery_count = len(
+                _extract_battery_blocks(
+                    status.data.system_status if status.data else None
+                )
+            )
+
             payloads = build_discovery_payloads(
                 gateway_id=gateway_id,
                 gateway_name=gateway_name,
@@ -268,6 +277,7 @@ class MqttPublisher:
                 string_ids=string_ids,
                 remote_meters=remote_meters or None,
                 device_signals=device_signals or None,
+                battery_count=battery_count,
                 controls=controls_mask,
                 writable=writable,
                 is_v1r=is_v1r,
@@ -406,6 +416,34 @@ class MqttPublisher:
                     await self._safe_publish(
                         f"{prefix}/current_charge",
                         f"{current_charge:.0f}",
+                        retain,
+                        qos,
+                    )
+
+                # Per-battery capacity and charge (Wh) from the cached
+                # system status battery blocks - lets degradation be tracked
+                # for each individual battery rather than the aggregate.
+                batteries = _extract_battery_blocks(data.system_status)
+                for i, batt in enumerate(batteries, start=1):
+                    b_prefix = f"{prefix}/batteries/{i}"
+                    if batt["capacity"] is not None:
+                        await self._safe_publish(
+                            f"{b_prefix}/capacity",
+                            f"{batt['capacity']:.0f}",
+                            retain,
+                            qos,
+                        )
+                    if batt["charge"] is not None:
+                        await self._safe_publish(
+                            f"{b_prefix}/charge",
+                            f"{batt['charge']:.0f}",
+                            retain,
+                            qos,
+                        )
+                if batteries:
+                    await self._safe_publish(
+                        f"{prefix}/batteries",
+                        json.dumps(batteries),
                         retain,
                         qos,
                     )
@@ -683,6 +721,7 @@ class MqttPublisher:
                     "soe_raw": data.soe_raw,
                     "total_capacity": total_capacity,
                     "current_charge": current_charge,
+                    "batteries": batteries,
                     "solar": solar if data.aggregates else None,
                     "grid": grid if data.aggregates else None,
                     "home": home if data.aggregates else None,
@@ -1262,6 +1301,34 @@ def _extract_battery_energy(
         if block_value is not None
     ]
     return sum(block_values) if block_values else None
+
+
+def _extract_battery_blocks(system_status: Optional[dict]) -> list:
+    """Extract per-battery capacity/charge values (Wh) from system status.
+
+    Returns a list of {"capacity": float|None, "charge": float|None} dicts,
+    one per battery block that reports at least one of the two values, in
+    gateway order (blocks with no usable values are skipped).  Callers can
+    use len() of the result for sensor discovery and enumerate() for
+    per-battery topics.
+    """
+    if not isinstance(system_status, dict):
+        return []
+
+    blocks = system_status.get("battery_blocks")
+    if not isinstance(blocks, list):
+        return []
+
+    batteries = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        capacity = _safe_float(block.get("nominal_full_pack_energy"))
+        charge = _safe_float(block.get("nominal_energy_remaining"))
+        if capacity is None and charge is None:
+            continue
+        batteries.append({"capacity": capacity, "charge": charge})
+    return batteries
 
 
 # Module-level singleton — imported by gateway_manager and main.py
