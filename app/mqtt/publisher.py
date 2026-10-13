@@ -1335,7 +1335,8 @@ def _extract_battery_blocks(system_status: Optional[dict]) -> list:
     "charge": float|None, "serial": str|None} dicts, one per battery
     block that reports at least one of the two values.  "serial" is the
     block's PackageSerialNumber when present, used to group the battery's
-    entities under its own Home Assistant device (#153).  "index" is the block's 1-based position
+    entities under its own Home Assistant device (#153).  "index" is the
+    block's 1-based position
     in the gateway's battery_blocks list, so a block that temporarily
     reports neither value is skipped without collapsing the numbering of
     the batteries after it — degradation histories keep pointing at the

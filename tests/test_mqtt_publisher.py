@@ -159,8 +159,18 @@ class TestExtractBatteryBlocks:
         }
         blocks = _extract_battery_blocks(status)
         assert len(blocks) == 2
-        assert blocks[0] == {"index": 1, "capacity": 13_500.0, "charge": 11_547.0, "serial": None}
-        assert blocks[1] == {"index": 2, "capacity": 13_500.0, "charge": 11_000.0, "serial": None}
+        assert blocks[0] == {
+            "index": 1,
+            "capacity": 13_500.0,
+            "charge": 11_547.0,
+            "serial": None,
+        }
+        assert blocks[1] == {
+            "index": 2,
+            "capacity": 13_500.0,
+            "charge": 11_000.0,
+            "serial": None,
+        }
 
     def test_package_serial_number_captured(self):
         """#153: a block's PackageSerialNumber is captured for HA grouping."""
