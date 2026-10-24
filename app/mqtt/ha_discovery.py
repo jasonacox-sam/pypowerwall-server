@@ -17,6 +17,8 @@ Sensors (numeric):
     battery_raw — Raw battery charge (%)
     solar       — Solar power (W, device_class=power)
     grid        — Grid power (W, device_class=power, positive=importing)
+    grid_voltage — Grid voltage (V, device_class=voltage, site CT average)
+    grid_current — Grid current (A, device_class=current, signed, positive=importing)
     home        — Home load (W, device_class=power)
     powerwall   — Powerwall power (W, device_class=power, positive=discharging)
     reserve     — Backup reserve target (%)
@@ -585,6 +587,22 @@ def build_discovery_payloads(
             device_class="power",
             state_class="measurement",
             icon="mdi:transmission-tower",
+        ),
+        sensor(
+            "grid_voltage", "Grid Voltage",
+            f"{data_prefix}/grid_voltage",
+            unit="V",
+            device_class="voltage",
+            state_class="measurement",
+            icon="mdi:sine-wave",
+        ),
+        sensor(
+            "grid_current", "Grid Current",
+            f"{data_prefix}/grid_current",
+            unit="A",
+            device_class="current",
+            state_class="measurement",
+            icon="mdi:current-ac",
         ),
         sensor(
             "home", "Home Load",

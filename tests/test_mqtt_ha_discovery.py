@@ -28,7 +28,7 @@ from app.models.gateway import Gateway, GatewayStatus, PowerwallData
 
 # Base entities every gateway announces: 20 sensors + 3 binary sensors.
 # Solar-string and remote-meter entities are added on top when reported.
-BASE_ENTITY_COUNT = 23
+BASE_ENTITY_COUNT = 25
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +144,21 @@ class TestBuildDiscoveryPayloads:
         p = results[topic]
         assert p["unit_of_measurement"] == "W"
         assert p["device_class"] == "power"
+
+    def test_grid_voltage_current_sensor_fields(self):
+        """Grid health sensors from the site CT averages (#177)."""
+        results = dict(self._payloads())
+        checks = {
+            "grid_voltage": ("V", "voltage", "pypowerwall/home/grid_voltage"),
+            "grid_current": ("A", "current", "pypowerwall/home/grid_current"),
+        }
+        for uid, (unit, device_class, state_topic) in checks.items():
+            p = results[f"homeassistant/sensor/pypowerwall_home_{uid}/config"]
+            assert p["unit_of_measurement"] == unit, uid
+            assert p["device_class"] == device_class, uid
+            assert p["state_class"] == "measurement", uid
+            assert p["state_topic"] == state_topic, uid
+            assert p["unique_id"] == f"pypowerwall_home_{uid}", uid
 
     def test_battery_energy_sensor_fields(self):
         results = dict(self._payloads())

@@ -35,6 +35,8 @@ Topic layout
     {prefix}/{gateway_id}/battery_raw     float  — raw SOE %
     {prefix}/{gateway_id}/solar           float  — W (positive = producing)
     {prefix}/{gateway_id}/grid            float  — W (positive = importing)
+    {prefix}/{gateway_id}/grid_voltage    float  — V (site CT average voltage)
+    {prefix}/{gateway_id}/grid_current    float  — A (signed, positive = importing)
     {prefix}/{gateway_id}/home            float  — W
     {prefix}/{gateway_id}/powerwall       float  — W (positive = discharging)
     {prefix}/{gateway_id}/grid_status     str    — "UP" | "DOWN" | "unknown"
@@ -505,6 +507,27 @@ class MqttPublisher:
                             f"{prefix}/powerwall", f"{pw_power:.1f}", retain, qos
                         )
 
+                    # Grid voltage / current from the site CT averages —
+                    # grid health monitoring (#177).  instant_average_current
+                    # is signed like grid power: positive = importing,
+                    # negative = exporting.
+                    grid_voltage = _extract_energy(
+                        agg, "site", "instant_average_voltage"
+                    )
+                    grid_current = _extract_energy(
+                        agg, "site", "instant_average_current"
+                    )
+                    for topic_suffix, val in (
+                        ("grid_voltage", grid_voltage),
+                        ("grid_current", grid_current),
+                    ):
+                        if val is not None:
+                            await self._safe_publish(
+                                f"{prefix}/{topic_suffix}",
+                                f"{val:.2f}",
+                                retain, qos,
+                            )
+
                     # Full aggregates JSON (useful for Node-RED, InfluxDB, etc.)
                     await self._safe_publish(
                         f"{prefix}/aggregates",
@@ -756,6 +779,8 @@ class MqttPublisher:
                     "batteries": batteries,
                     "solar": solar if data.aggregates else None,
                     "grid": grid if data.aggregates else None,
+                    "grid_voltage": grid_voltage if data.aggregates else None,
+                    "grid_current": grid_current if data.aggregates else None,
                     "home": home if data.aggregates else None,
                     "powerwall": pw_power if data.aggregates else None,
                     "grid_status": data.grid_status,
@@ -1326,7 +1351,11 @@ def _extract_power(aggregates: dict, key: str) -> Optional[float]:
 
 
 def _extract_energy(aggregates: Optional[dict], section: str, field: str) -> Optional[float]:
-    """Safely extract a lifetime energy accumulator (Wh) from aggregates."""
+    """Safely extract a numeric field from an aggregates section.
+
+    Used for lifetime energy accumulators (Wh) and instantaneous CT
+    readings (V/A) alike — both live at aggregates[section][field].
+    """
     try:
         val = aggregates[section][field]
     except (KeyError, TypeError):

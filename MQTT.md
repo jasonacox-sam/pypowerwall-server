@@ -145,6 +145,8 @@ Base path: `{MQTT_TOPIC_PREFIX}/{gateway_id}/`
 | `pypowerwall/{gw}/battery` | `85.3` | `%` |
 | `pypowerwall/{gw}/solar` | `2340` | `W` |
 | `pypowerwall/{gw}/grid` | `-1100` | `W` (negative = exporting) |
+| `pypowerwall/{gw}/grid_voltage` | `240.2` | `V` (site CT average voltage) |
+| `pypowerwall/{gw}/grid_current` | `-12.4` | `A` (negative = exporting) |
 | `pypowerwall/{gw}/home` | `1240` | `W` |
 | `pypowerwall/{gw}/powerwall` | `1200` | `W` (positive = discharging) |
 | `pypowerwall/{gw}/grid_status` | `UP` or `DOWN` | — |
@@ -378,6 +380,8 @@ Sensors to auto-discover per gateway:
 | Battery Raw | — | `%` | `mdi:battery-medium` |
 | Solar Power | `power` | `W` | `mdi:solar-power` |
 | Grid Power | `power` | `W` | `mdi:transmission-tower` |
+| Grid Voltage | `voltage` | `V` | `mdi:sine-wave` |
+| Grid Current | `current` | `A` | `mdi:current-ac` |
 | Home Power | `power` | `W` | `mdi:home-lightning-bolt` |
 | Powerwall Power | `power` | `W` | `mdi:battery-charging` |
 | Grid Status | — | — | `mdi:transmission-tower` |
@@ -566,6 +570,8 @@ Powerwall (default)
   ├── Battery              85.3 %
   ├── Solar Power          2340 W
   ├── Grid Power           -1100 W
+  ├── Grid Voltage         240.2 V
+  ├── Grid Current         -12.4 A
   ├── Home Power           1240 W
   ├── Powerwall Power      1200 W
   ├── Grid Status          Connected
