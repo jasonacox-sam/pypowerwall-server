@@ -407,6 +407,19 @@ def test_stats_config_reports_fleetapi_http(client, monkeypatch, value, expected
     assert response.json()["config"]["PW_FLEETAPI_HTTP"] == expected
 
 
+def test_fleetapi_http_reaches_the_library_environment(monkeypatch):
+    """Settings read PW_FLEETAPI_HTTP case-insensitively, but pypowerwall reads
+    only the uppercase variable: a lowercase setting is passed on to it."""
+    from app.config import Settings
+
+    monkeypatch.setenv("PW_FLEETAPI_HTTP", "x")  # record the original state
+    monkeypatch.delenv("PW_FLEETAPI_HTTP")
+    monkeypatch.setenv("pw_fleetapi_http", "1.1")
+    assert Settings().fleetapi_http == "1.1"
+    import os
+    assert os.environ.get("PW_FLEETAPI_HTTP") == "1.1"
+
+
 @pytest.mark.parametrize("failover", [True, False])
 def test_stats_config_reports_failover(client, monkeypatch, failover):
     """/stats config reports PW_FAILOVER, as the proxy's /stats does."""

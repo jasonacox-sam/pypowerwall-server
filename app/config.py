@@ -592,6 +592,11 @@ class Settings(BaseSettings):
                 if os.path.isdir("/data")
                 else "data/timeseries.db"
             )
+        # pypowerwall reads PW_FLEETAPI_HTTP from the process environment,
+        # uppercase only, while settings are case-insensitive: pass the
+        # resolved value on, so /stats reports what the library uses.
+        if self.fleetapi_http:
+            os.environ["PW_FLEETAPI_HTTP"] = self.fleetapi_http
         self._initialize_gateways()
 
     def _load_config_file(self) -> bool:
