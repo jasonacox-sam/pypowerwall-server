@@ -396,6 +396,17 @@ async def test_failover_setting_passed_to_powerwall_constructor(
     assert powerwall_spy.call_args.kwargs.get("failover") is failover
 
 
+@pytest.mark.parametrize("value, expected", [("1.1", "1.1"), ("", None), (None, None)])
+def test_stats_config_reports_fleetapi_http(client, monkeypatch, value, expected):
+    """/stats config reports PW_FLEETAPI_HTTP like the proxy (unset or empty: null)."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "fleetapi_http", value)
+    response = client.get("/stats")
+    assert response.status_code == 200
+    assert response.json()["config"]["PW_FLEETAPI_HTTP"] == expected
+
+
 @pytest.mark.parametrize("failover", [True, False])
 def test_stats_config_reports_failover(client, monkeypatch, failover):
     """/stats config reports PW_FAILOVER, as the proxy's /stats does."""

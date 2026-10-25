@@ -241,7 +241,7 @@ PW_GW_PWD=your_gateway_password                  # Gateway password (last 5 char
 PW_RSA_KEY_PATH=/path/to/tedapi_rsa_private.pem  # RSA-4096 private key for v1r encrypted channel
 PW_WIFI_HOST=192.168.91.1                         # Gateway WiFi AP: follower Powerwalls + LAN fallback (default: not set)
 PW_FAILOVER=yes                                   # "no" pins the configured transports: no WiFi/cloud fallback (default: yes)
-PW_FLEETAPI_HTTP=1.1                             # "1.1" forces HTTP/1.1 for FleetAPI requests (default: HTTP/2); escape hatch for HTTP/2 connection-reuse errors
+#PW_FLEETAPI_HTTP=1.1                             # "1.1" forces HTTP/1.1 for FleetAPI requests (default: HTTP/2); escape hatch for HTTP/2 connection-reuse errors
 PW_TIMEZONE=America/Los_Angeles
 ```
 
