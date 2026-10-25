@@ -2,6 +2,11 @@
 
 ## Version History
 
+### [Unreleased]
+
+**Added:**
+- `PW_FLEETAPI_HTTP` - setting `1.1` forces HTTP/1.1 for all Tesla FleetAPI requests (default: HTTP/2), an escape hatch for the intermittent HTTP/2 connection-reuse errors (`COMPRESSION_ERROR`, h2 state errors) behind the 429 storms fixed in pypowerwall #433/#436. Documented in README and API, and reported in `/stats` under `config` like the proxy.
+
 ### [0.12.0] - 2026-10-19
 
 The server now answers the legacy proxy's API the way the proxy does, so a

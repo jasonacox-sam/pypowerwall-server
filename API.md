@@ -128,6 +128,7 @@ PW_GATEWAYS='[
 | `PW_SITEID` | none | Cloud, FleetAPI, Hybrid, Local | ✓ | Tesla energy site id on accounts with several sites; picks the site for Cloud and FleetAPI gateways and the site the hybrid cloud connection controls. |
 | `PW_TIMEZONE` | `America/Los_Angeles` | All | ✓ | Gateway time zone (single-gateway form). |
 | `PW_FAILOVER` | `yes` | All | ✓ | pypowerwall transport failover. `no` pins the configured transports: the v1r leader stays on the wired LAN, failed requests are not rerouted, and a local connection never falls back to Cloud or FleetAPI. |
+| `PW_FLEETAPI_HTTP` | unset | FleetAPI, Cloud, Hybrid | ✓ | Forces HTTP/1.1 for all Tesla FleetAPI requests (default: HTTP/2). Escape hatch for intermittent HTTP/2 connection-reuse errors (`COMPRESSION_ERROR`, h2 state errors) on some sites; reported in `/stats` under `config`. |
 
 ### Auth and control
 
