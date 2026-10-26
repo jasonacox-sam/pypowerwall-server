@@ -26,9 +26,11 @@ from app.mqtt.ha_discovery import (
 from app.mqtt.publisher import MqttPublisher
 from app.models.gateway import Gateway, GatewayStatus, PowerwallData
 
-# Base entities every gateway announces: 20 sensors + 3 binary sensors.
-# Solar-string and remote-meter entities are added on top when reported.
-BASE_ENTITY_COUNT = 25
+# Base entities every gateway announces: 18 sensors + 3 binary sensors.
+# Solar-string, remote-meter and grid voltage/current entities are added on
+# top when reported (grid sensors only when the site CT-average fields are
+# present — #177).
+BASE_ENTITY_COUNT = 23
 
 
 # ---------------------------------------------------------------------------
@@ -69,13 +71,15 @@ def make_status(
 class TestBuildDiscoveryPayloads:
     def _payloads(self, gateway_id="home", gateway_name="Home Powerwall",
                   prefix="pypowerwall", ha_prefix="homeassistant",
-                  version="23.44.0") -> list[tuple[str, dict]]:
+                  version="23.44.0",
+                  grid_metrics=None) -> list[tuple[str, dict]]:
         raw = build_discovery_payloads(
             gateway_id=gateway_id,
             gateway_name=gateway_name,
             topic_prefix=prefix,
             ha_prefix=ha_prefix,
             version=version,
+            grid_metrics=grid_metrics,
         )
         return [(topic, json.loads(payload)) for topic, payload in raw]
 
@@ -147,7 +151,13 @@ class TestBuildDiscoveryPayloads:
 
     def test_grid_voltage_current_sensor_fields(self):
         """Grid health sensors from the site CT averages (#177)."""
-        results = dict(self._payloads())
+        results = dict(
+            self._payloads(grid_metrics=["grid_voltage", "grid_current"])
+        )
+        assert (
+            len(self._payloads(grid_metrics=["grid_voltage", "grid_current"]))
+            == BASE_ENTITY_COUNT + 2
+        )
         checks = {
             "grid_voltage": ("V", "voltage", "pypowerwall/home/grid_voltage"),
             "grid_current": ("A", "current", "pypowerwall/home/grid_current"),
@@ -159,6 +169,17 @@ class TestBuildDiscoveryPayloads:
             assert p["state_class"] == "measurement", uid
             assert p["state_topic"] == state_topic, uid
             assert p["unique_id"] == f"pypowerwall_home_{uid}", uid
+
+    def test_grid_voltage_current_absent_without_metrics(self):
+        """No grid health entities when the gateway lacks the CT-average
+        fields (#177) — avoids unknown HA entities."""
+        results = dict(self._payloads())
+        assert "homeassistant/sensor/pypowerwall_home_grid_voltage/config" not in results
+        assert "homeassistant/sensor/pypowerwall_home_grid_current/config" not in results
+        assert (
+            len(self._payloads(grid_metrics=["grid_voltage"]))
+            == BASE_ENTITY_COUNT + 1
+        )
 
     def test_battery_energy_sensor_fields(self):
         results = dict(self._payloads())

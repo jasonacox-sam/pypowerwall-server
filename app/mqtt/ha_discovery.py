@@ -240,6 +240,7 @@ def discovery_signature(
     vitals: Optional[Dict[str, Any]],
     device_signals: Optional[Dict[str, Dict[str, float]]] = None,
     batteries: Optional[Sequence[Dict[str, Any]]] = None,
+    grid_metrics: Optional[Sequence[str]] = None,
 ) -> frozenset:
     """The optional (data-dependent) entities a snapshot would announce.
 
@@ -254,6 +255,10 @@ def discovery_signature(
     blocks are announced without waiting for a broker reconnect.
     """
     signature = set()
+    # Grid voltage/current sensors are only announced when the gateway
+    # reports the site CT-average fields (#177); the scalar topics are
+    # gated the same way in the publisher.
+    signature.update(("grid_metric", m) for m in grid_metrics or ())
     if isinstance(strings, dict):
         signature.update(("string", sid) for sid in strings)
     for din, cts in extract_remote_meters(vitals).items():
@@ -325,6 +330,7 @@ def build_discovery_payloads(
     controls: int = 0,
     writable: bool = False,
     is_v1r: bool = False,
+    grid_metrics: Optional[Sequence[str]] = None,
 ) -> list[tuple[str, str]]:
     """Build all HA auto-discovery (topic, payload) pairs for a gateway.
 
@@ -361,6 +367,11 @@ def build_discovery_payloads(
                    FleetAPI, bound hybrid cloud or v1r); those four need it.
         is_v1r:    The gateway uses the v1r transport; the islanding buttons
                    (PW2 and PW3) need it.
+        grid_metrics:  Grid health metrics the gateway actually reports
+                       (subset of {"grid_voltage", "grid_current"} from the
+                       site CT averages, #177).  Sensors whose metric is not
+                       reported get no entity, matching the topics actually
+                       published.
 
     Returns:
         List of (topic, json_payload_str) tuples, one per sensor/binary sensor/control.
@@ -588,21 +599,30 @@ def build_discovery_payloads(
             state_class="measurement",
             icon="mdi:transmission-tower",
         ),
-        sensor(
-            "grid_voltage", "Grid Voltage",
-            f"{data_prefix}/grid_voltage",
-            unit="V",
-            device_class="voltage",
-            state_class="measurement",
-            icon="mdi:sine-wave",
+        # Grid health sensors from the site CT averages (#177) — only
+        # announced when the gateway reports the fields, so unsupported
+        # gateways don't get unknown HA entities.
+        *(
+            [sensor(
+                "grid_voltage", "Grid Voltage",
+                f"{data_prefix}/grid_voltage",
+                unit="V",
+                device_class="voltage",
+                state_class="measurement",
+                icon="mdi:sine-wave",
+            )]
+            if "grid_voltage" in (grid_metrics or ()) else []
         ),
-        sensor(
-            "grid_current", "Grid Current",
-            f"{data_prefix}/grid_current",
-            unit="A",
-            device_class="current",
-            state_class="measurement",
-            icon="mdi:current-ac",
+        *(
+            [sensor(
+                "grid_current", "Grid Current",
+                f"{data_prefix}/grid_current",
+                unit="A",
+                device_class="current",
+                state_class="measurement",
+                icon="mdi:current-ac",
+            )]
+            if "grid_current" in (grid_metrics or ()) else []
         ),
         sensor(
             "home", "Home Load",

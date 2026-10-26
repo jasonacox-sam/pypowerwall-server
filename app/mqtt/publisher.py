@@ -311,6 +311,7 @@ class MqttPublisher:
                 controls=controls_mask,
                 writable=writable,
                 is_v1r=is_v1r,
+                grid_metrics=_grid_metrics(status.data if status else None),
             )
             for topic, payload in payloads:
                 await self._safe_publish(topic, payload, retain=True, qos=settings.mqtt_qos)
@@ -375,6 +376,11 @@ class MqttPublisher:
                     gateway_id,
                     exc_info=True,
                 )
+        # Grid voltage/current availability (#177): computed once per poll
+        # and shared with discovery so the HA entities match the topics
+        # actually published (no unknown entities on gateways that lack
+        # the site CT-average fields).
+        grid_metrics = _grid_metrics(data)
         controls_state = self._control_announce_state(gateway_id)
         batteries = self._battery_blocks(
             gateway_id, data.system_status if data else None
@@ -384,6 +390,7 @@ class MqttPublisher:
             data.vitals if data else None,
             device_signals,
             batteries=batteries,
+            grid_metrics=grid_metrics,
         )
         announced = self._discovery_sent.get(gateway_id)
         last_controls = self._discovery_controls_state.get(gateway_id)
@@ -1348,6 +1355,22 @@ def _extract_power(aggregates: dict, key: str) -> Optional[float]:
         return float(aggregates[key]["instant_power"])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _grid_metrics(data) -> list:
+    """Grid health metrics the snapshot actually reports (#177).
+
+    Returns the subset of ["grid_voltage", "grid_current"] for which the
+    site CT-average fields are present, so HA discovery only announces
+    sensors whose state topics will be published.
+    """
+    metrics: list = []
+    if data and isinstance(data.aggregates, dict):
+        if _extract_energy(data.aggregates, "site", "instant_average_voltage") is not None:
+            metrics.append("grid_voltage")
+        if _extract_energy(data.aggregates, "site", "instant_average_current") is not None:
+            metrics.append("grid_current")
+    return metrics
 
 
 def _extract_energy(aggregates: Optional[dict], section: str, field: str) -> Optional[float]:
