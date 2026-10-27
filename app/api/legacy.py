@@ -25,7 +25,7 @@ Auth Routes (powerflow web app compatibility):
     - POST /api/login/Basic -> Fake login; sets long-lived AuthCookie/UserRecord
 
 Control Routes (require authentication, except status):
-    - GET /control/status -> Control availability (unauthenticated, {"enabled": bool})
+    - GET /control/status -> Control availability and default-gateway capabilities
     - POST /control/{path} -> Control operations (reserve, mode, etc.)
 
 Tesla Cloud Routes (server-only; not in the pypowerwall proxy):
@@ -56,6 +56,7 @@ Adding New Endpoints:
 """
 import asyncio
 import logging
+import math
 import os
 import time
 from datetime import datetime, timedelta
@@ -200,17 +201,25 @@ def powerwall_unit_labels(
 
 
 @router.get("/control/status")
-async def control_status():
+async def control_status() -> Dict[str, bool]:
     """Control availability for the Console WebGUI (unauthenticated).
 
-    Returns only ``{"enabled": bool}`` derived from
-    ``settings.control_enabled`` (i.e. ``PW_CONTROL_SECRET`` is set).
-    Deliberately contains no secret and no gateway details because
-    ``/console`` and ``/stats`` are unauthenticated — the browser needs
-    to know *whether* to show the Control card without learning the token.
-    All actual writes stay behind ``verify_control_token``.
+    Reports whether control is enabled and whether the default gateway's live
+    connection supports battery dispatch. Only booleans are exposed, without
+    gateway I/O, credentials or identifiers. All writes remain authenticated.
     """
-    return {"enabled": settings.control_enabled}
+    enabled = settings.control_enabled
+    battery_dispatch = False
+    if enabled:
+        try:
+            # Use the same gateway selection and live-connection check as the
+            # dispatch endpoints. /stats aggregates modes across all gateways
+            # and can describe a different gateway in a multi-gateway setup.
+            battery_dispatch = _is_v1r(get_default_gateway())
+        except HTTPException:
+            # The Console must still load before any gateway is configured.
+            pass
+    return {"enabled": enabled, "battery_dispatch": battery_dispatch}
 
 
 # The proxy's control API (pypowerwall proxy/server.py), so proxy clients such
@@ -367,7 +376,7 @@ async def _proxy_form_control(
         return _proxy_response({"unauthorized": "Control Command Token Invalid"})
 
     action, value = path, field("value")
-    if not value:
+    if not value and action not in ("dispatch", "resume"):
         read = await _proxy_read(action)
         if read is None:
             read = {"error": "Invalid Command Action"}
@@ -375,7 +384,17 @@ async def _proxy_form_control(
 
     invalid = {"error": "Control Command Value Invalid"}
     success = None  # the proxy's fixed reply for some writes, else the result
-    if action == "reserve":
+    if action == "dispatch":
+        try:
+            data = {
+                "power_watts": float(field("power_watts")),
+                "duration_seconds": int(field("duration_seconds")),
+            }
+        except (ValueError, OverflowError):
+            return _proxy_response({"error": "Invalid battery dispatch parameters"})
+    elif action == "resume":
+        data = {}
+    elif action == "reserve":
         if not _digits(value):
             return _proxy_response(invalid)
         data = {"value": int(value)}
@@ -499,13 +518,36 @@ _CONTROL_REQUEST_BODY = {
                     "type": "object",
                     "properties": {
                         name: {"type": "string"}
-                        for name in ("value", "token", "mode", "level")
+                        for name in (
+                            "value",
+                            "token",
+                            "mode",
+                            "level",
+                            "power_watts",
+                            "duration_seconds",
+                        )
                     },
                 }
             },
         },
     }
 }
+
+
+@router.post("/control/dispatch", openapi_extra=_CONTROL_REQUEST_BODY)
+async def control_dispatch(
+    request: Request, authorization: Optional[str] = Header(None)
+) -> Any:
+    """Set battery power temporarily through the local v1r connection."""
+    return await control_api("dispatch", request, authorization)
+
+
+@router.post("/control/resume", openapi_extra=_CONTROL_REQUEST_BODY)
+async def control_resume(
+    request: Request, authorization: Optional[str] = Header(None)
+) -> Any:
+    """Release a local battery dispatch and resume the configured mode."""
+    return await control_api("resume", request, authorization)
 
 
 @router.post("/control/{path:path}", openapi_extra=_CONTROL_REQUEST_BODY)
@@ -574,6 +616,48 @@ async def _control_json(path: str, data: dict):
     """Validate and run one authenticated control request (the JSON API; the
     proxy form API maps onto it). Raises HTTPException on bad input or a
     failed write."""
+
+    if path in ("dispatch", "resume"):
+        args = ()
+        method = "resume_battery_operation"
+        if path == "dispatch":
+            watts, seconds = data.get("power_watts"), data.get("duration_seconds")
+            try:
+                valid_power = (
+                    isinstance(watts, (int, float))
+                    and not isinstance(watts, bool)
+                    and math.isfinite(watts)
+                )
+            except OverflowError:
+                valid_power = False
+            if (
+                not valid_power
+                or type(seconds) is not int
+                or not 1 <= seconds <= 86400
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="power_watts must be finite and duration_seconds "
+                    "must be an integer from 1 to 86400",
+                )
+            method, args = "dispatch_battery_power", (watts, seconds)
+        gateway_id = get_default_gateway()
+        if not _is_v1r(gateway_id):
+            raise HTTPException(
+                status_code=503,
+                detail="Battery dispatch requires v1r LAN transport",
+            )
+        # Timed dispatch always uses local RSA control, including in hybrid
+        # cloud mode. The shared write lock orders dispatch and resume even
+        # when a request times out while its worker is still running.
+        result = await gateway_manager.local_control(
+            gateway_id, method, *args, timeout=max(10.0, settings.timeout + 5.0)
+        )
+        if not isinstance(result, dict) or not result or is_error_result(result):
+            raise HTTPException(
+                status_code=503, detail="Battery dispatch command failed"
+            )
+        return result
 
     # Validate grid_charging requires an explicit boolean value to prevent
     # silent state changes from malformed or empty payloads.
