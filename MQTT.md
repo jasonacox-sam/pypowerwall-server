@@ -146,7 +146,7 @@ Base path: `{MQTT_TOPIC_PREFIX}/{gateway_id}/`
 | `pypowerwall/{gw}/solar` | `2340` | `W` |
 | `pypowerwall/{gw}/grid` | `-1100` | `W` (negative = exporting) |
 | `pypowerwall/{gw}/grid_voltage` | `240.2` | `V` (site CT average voltage) |
-| `pypowerwall/{gw}/grid_current` | `-12.4` | `A` (negative = exporting) |
+| `pypowerwall/{gw}/grid_current` | `-12.4` | `A` (TEDAPI: signed like grid power, negative = exporting; local API: as the gateway reports it) |
 | `pypowerwall/{gw}/home` | `1240` | `W` |
 | `pypowerwall/{gw}/powerwall` | `1200` | `W` (positive = discharging) |
 | `pypowerwall/{gw}/grid_status` | `UP` or `DOWN` | — |

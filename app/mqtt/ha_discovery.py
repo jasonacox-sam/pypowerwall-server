@@ -18,7 +18,7 @@ Sensors (numeric):
     solar       — Solar power (W, device_class=power)
     grid        — Grid power (W, device_class=power, positive=importing)
     grid_voltage — Grid voltage (V, device_class=voltage, site CT average)
-    grid_current — Grid current (A, device_class=current, signed, positive=importing)
+    grid_current — Grid current (A, device_class=current; TEDAPI: signed like grid power)
     home        — Home load (W, device_class=power)
     powerwall   — Powerwall power (W, device_class=power, positive=discharging)
     reserve     — Backup reserve target (%)

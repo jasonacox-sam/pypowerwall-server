@@ -36,7 +36,7 @@ Topic layout
     {prefix}/{gateway_id}/solar           float  — W (positive = producing)
     {prefix}/{gateway_id}/grid            float  — W (positive = importing)
     {prefix}/{gateway_id}/grid_voltage    float  — V (site CT average voltage)
-    {prefix}/{gateway_id}/grid_current    float  — A (signed, positive = importing)
+    {prefix}/{gateway_id}/grid_current    float  — A (TEDAPI: signed like grid power)
     {prefix}/{gateway_id}/home            float  — W
     {prefix}/{gateway_id}/powerwall       float  — W (positive = discharging)
     {prefix}/{gateway_id}/grid_status     str    — "UP" | "DOWN" | "unknown"
@@ -515,9 +515,10 @@ class MqttPublisher:
                         )
 
                     # Grid voltage / current from the site CT averages —
-                    # grid health monitoring (#177).  instant_average_current
-                    # is signed like grid power: positive = importing,
-                    # negative = exporting.
+                    # grid health monitoring (#177).  On TEDAPI, pypowerwall
+                    # computes instant_average_current as grid power / voltage,
+                    # so it is signed like grid power (positive = importing).
+                    # The local API passes through the gateway's value.
                     grid_voltage = _extract_energy(
                         agg, "site", "instant_average_voltage"
                     )
