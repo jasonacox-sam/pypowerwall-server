@@ -22,6 +22,7 @@
   connection through `/control/status`, including mixed multi-gateway setups,
   and refreshes as connections change.
 - **`PW_FLEETAPI_HTTP` setting** - `1.1` forces HTTP/1.1 for all Tesla FleetAPI requests (default: HTTP/2), an escape hatch for the intermittent HTTP/2 connection-reuse errors (`COMPRESSION_ERROR`, h2 state errors) seen on some sites. pypowerwall 0.22.1 reads it (jasonacox/pypowerwall#436). `/stats` reports it under `config`, as the proxy does.
+- **MQTT grid voltage and current** - `{prefix}/{gw}/grid_voltage` (V) and `{prefix}/{gw}/grid_current` (A) from the site CT averages in `/api/meters/aggregates`, also in the `status` JSON, with Home Assistant Grid Voltage and Grid Current sensors. No new gateway requests. A gateway that doesn't report a value gets neither the topic nor the entity. On TEDAPI the current is grid power divided by voltage, so it is signed like grid power (negative = exporting); the Powerwall 2 local API passes through the gateway's value. (#179, #177)
 
 **Changed:**
 - **pypowerwall upgraded to 0.22.1** (from 0.21.0; `requirements.txt` pin and `pyproject.toml` minimum). Library changes that reach server users:
