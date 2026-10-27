@@ -128,6 +128,7 @@ PW_GATEWAYS='[
 | `PW_SITEID` | none | Cloud, FleetAPI, Hybrid, Local | ✓ | Tesla energy site id on accounts with several sites; picks the site for Cloud and FleetAPI gateways and the site the hybrid cloud connection controls. |
 | `PW_TIMEZONE` | `America/Los_Angeles` | All | ✓ | Gateway time zone (single-gateway form). |
 | `PW_FAILOVER` | `yes` | All | ✓ | pypowerwall transport failover. `no` pins the configured transports: the v1r leader stays on the wired LAN, failed requests are not rerouted, and a local connection never falls back to Cloud or FleetAPI. |
+| `PW_FLEETAPI_HTTP` | unset | FleetAPI | ✓ | `1.1` forces HTTP/1.1 for all Tesla FleetAPI requests (default: HTTP/2), including a hybrid cloud connection that uses FleetAPI. Escape hatch for intermittent HTTP/2 connection-reuse errors (`COMPRESSION_ERROR`, h2 state errors) on some sites; reported in `/stats` under `config`. |
 
 ### Auth and control
 
@@ -333,7 +334,7 @@ for the request format and write path.
 
 | Method | Path | Auth | Response |
 |--------|------|------|----------|
-| GET | `/control/status` | | `{"enabled"}`: whether `PW_CONTROL_SECRET` is set. |
+| GET | `/control/status` | | `{"enabled": bool, "battery_dispatch": bool}`: whether `PW_CONTROL_SECRET` is set and battery dispatch is available on the default gateway's live v1r connection. Both fields are booleans; no credentials or gateway identifiers are exposed. |
 | GET | `/control/reserve` | | `{"reserve"}`, as in the proxy. Error when control is off. |
 | GET | `/control/mode` | | `{"mode"}` (`"unknown"` when not known), as in the proxy. |
 | GET | `/control/grid_charging` | | `{"grid_charging": true \| false}`, as in the proxy. |
@@ -341,6 +342,8 @@ for the request format and write path.
 | GET | `/control/max_backup` | | Current backup events (TEDAPI v1r), as in the proxy, cached 30 seconds. With a valid token (the `Authorization` header, preferred, or `?token=`, which can end up in access logs), an expired manual backup event is cancelled, decided on fresh data. |
 | POST | `/control/{path}` | token | Set `reserve`, `mode`, `grid_charging`, `grid_export`, `reserve_hold` or `max_backup`; returns the library result. Also takes the proxy's form-encoded requests (below). |
 | POST | `/control/islanding` | token | Go off grid or reconnect (TEDAPI v1r only). |
+| POST | `/control/dispatch` | token | Timed local battery power setpoint (TEDAPI v1r only). |
+| POST | `/control/resume` | token | Release a local battery dispatch. |
 | GET | `/api/tesla/tariff_rate` | | The site's Tesla tariff from the cloud. Cached 5 minutes; the last good value is served if a refresh fails. |
 | POST | `/api/tesla/time_of_use_settings` | token | Update the Time-of-Use tariff. Body `{"tou_settings": {..., "tariff_content_v2": {...}}}`; only `tou_settings` is sent to Tesla. |
 
@@ -504,6 +507,72 @@ a hybrid cloud connection exists. A write that was sent is final: there's no
 second attempt through the cloud, even after a timeout, since it may already
 have been applied. When the LAN is down (the library's LAN failover tripped, or the last poll failed) or there's no local connection, the
 path above applies. Islanding is unaffected.
+
+### Timed battery dispatch: `POST /control/dispatch` and `POST /control/resume`
+
+The Console's **Powerwall Control → Battery Dispatch** panel provides charge /
+discharge selection, power in watts, duration in seconds, **Start dispatch**
+and **Resume normal operation**. It appears when control is enabled and the
+default gateway uses local v1r, and uses the shared authorization token. Its
+availability follows `battery_dispatch` from `/control/status`, refreshed as
+live connections change, independently of other gateways' modes in `/stats`. These
+actions are independent of Save. The UI validates power and duration, prevents
+duplicate requests while a command is pending, and reports acknowledgements;
+the power flow shows actual battery power. Before starting a discharge, the
+Console uses the same confirmation dialog as grid-export controls to warn
+about grid export and draining below the backup reserve.
+
+Dispatch takes `{"power_watts": -500, "duration_seconds": 30}` and an
+`Authorization: Bearer <PW_CONTROL_SECRET>` header. Resume takes `{}` with the
+same header. Both also accept the proxy's form encoding, using `token` plus
+`power_watts` and `duration_seconds` for dispatch. They require the local
+paired RSA v1r connection, even with hybrid cloud control configured, and
+share the gateway write lock so resume waits for an in-progress dispatch.
+
+```bash
+curl -X POST -H 'Authorization: Bearer <secret>' -H 'Content-Type: application/json' \
+  -d '{"power_watts":-500,"duration_seconds":30}' http://localhost:8675/control/dispatch
+curl -X POST -d 'token=<secret>' http://localhost:8675/control/resume
+```
+
+Positive watts discharge, negative watts charge; zero requests zero battery
+power. Power must be a finite number (not a boolean), and duration an integer
+from 1 to 86400 seconds. A new dispatch replaces power and timer. At expiry,
+or on resume, the gateway returns to its configured mode. Use short durations
+and renew as needed. These commands do not change reserve, tariff or gateway
+configuration, or cancel manual backup events. Firmware support and gateway
+limits apply.
+
+Success returns `{"power_watts": -500.0, "duration_seconds": 30}` or
+`{"resume_battery_operation": true}`. An acknowledgement confirms acceptance;
+observe the polled `/aggregates` to check battery power. Bad input returns
+400; an unsupported connection, gateway rejection or timeout returns 503.
+JSON errors use `{"detail": ...}`; forms use the proxy's `{"error": ...}`
+and status 400. Both require `PW_CONTROL_SECRET`; an invalid token returns 401.
+Requires pypowerwall 0.22.0 or later. An older library returns a command failure without
+falling back to cloud.
+
+> **Warning:** A discharge can override the backup reserve and grid-export
+> setting, export electricity to the grid, and drain below the backup reserve.
+> On Powerwall 2 with Backup Gateway 1 (firmware 26.34.0), discharge ran with
+> reserve at 100% and export set to `pv_only` or `never`, exported the excess,
+> and raised `BackfeedLimited` and `BatteryUnexpectedPower` alerts. Do not rely
+> on those settings to prevent export or protect backup energy during dispatch.
+> The Console asks for confirmation before a discharge; API clients must account
+> for this behavior themselves.
+
+Observed on Powerwall 3 (firmware 26.26.4, v1r LAN, export `battery_ok`):
+discharge beyond the home load exports to the grid, `0` W holds the battery
+idle while the home draws from the grid, and requests above 10,000 W are
+rejected (status code 11). Mode, reserve, grid-charging and export settings
+remain unchanged afterwards; unchanged settings do not mean dispatch obeys
+them. Charging from the grid (-1000 W, grid charging enabled) was validated
+on 2x Powerwall 3 (firmware 26.26.11). Through this server on Powerwall 2 with
+Backup Gateway 1, a -2000 W dispatch cut charging from 5,000 W to about 2,000 W
+until resumed, and `0` W held the battery near idle while solar exported. Not
+yet verified: behavior during a grid outage or with grid charging disabled, and
+reserve/export overrides on Powerwall 3. Use short durations and check actual
+battery and grid power.
 
 ### Islanding: `POST /control/islanding`
 

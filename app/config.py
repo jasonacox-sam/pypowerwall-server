@@ -89,6 +89,7 @@ Environment Variables (Proxy Compatible):
         PW_RSA_KEY_PATH      - Path to RSA-4096 private key PEM for TEDAPI v1r LAN access (default: none)
         PW_WIFI_HOST         - WiFi host IP for TEDAPI v1r WiFi fallback (default: none)
         PW_FAILOVER          - Transport/mode failover "yes"/"no" (default: "yes")
+        PW_FLEETAPI_HTTP     - "1.1" forces HTTP/1.1 for FleetAPI requests (default: HTTP/2)
         PROXY_BASE_URL       - Base URL for reverse proxy (default: "/")
         CORS_ORIGINS         - JSON array of allowed CORS origins (default: ["*"])
         PW_CONFIG            - Gateway config file path (YAML/JSON; overrides
@@ -412,6 +413,9 @@ class Settings(BaseSettings):
     failover: bool = Field(
         default=True, alias="PW_FAILOVER"
     )  # pypowerwall failover; false pins the configured transports
+    fleetapi_http: Optional[str] = Field(
+        default=None, alias="PW_FLEETAPI_HTTP"
+    )  # "1.1" forces HTTP/1.1 for all FleetAPI requests (HTTP/2 default)
     neg_solar: bool = Field(
         default=True, alias="PW_NEG_SOLAR"
     )  # Allow negative solar values (default: yes, as in the proxy)
@@ -588,6 +592,11 @@ class Settings(BaseSettings):
                 if os.path.isdir("/data")
                 else "data/timeseries.db"
             )
+        # pypowerwall reads PW_FLEETAPI_HTTP from the process environment,
+        # uppercase only, while settings are case-insensitive: pass the
+        # resolved value on, so /stats reports what the library uses.
+        if self.fleetapi_http:
+            os.environ["PW_FLEETAPI_HTTP"] = self.fleetapi_http
         self._initialize_gateways()
 
     def _load_config_file(self) -> bool:
